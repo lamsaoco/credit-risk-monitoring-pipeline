@@ -1,0 +1,18 @@
+[project]
+name = "credit-risk-monitoring-pipeline"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "boto3>=1.42.69",
+    "fredapi>=0.5.2",
+    "pandas>=3.0.1",
+    "pyspark>=4.1.1",
+]
+
+[dependency-groups]
+dev = [
+    "jupyter>=1.1.1",
+    "notebook>=7.5.5",
+]
