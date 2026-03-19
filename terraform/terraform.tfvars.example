@@ -1,0 +1,17 @@
+variable "aws_region" {
+  description = "Region"
+  type        = string
+  default     = "your-region-here"
+}
+
+variable "bucket_name" {
+  description = "S3 Bucket Name"
+  type        = string
+  default     = "your-bucket-name-here"
+}
+
+variable "project_name" {
+  description = "Project Name"
+  type        = string
+  default     = "your-project-name-here"
+}
