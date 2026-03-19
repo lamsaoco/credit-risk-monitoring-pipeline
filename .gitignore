@@ -3,3 +3,6 @@ fred-api-key.txt
 2024_lar.txt
 *.parquet*
 *SUCCESS*
+*aws*
+terraform/variables.tf
+*.tfstate*
