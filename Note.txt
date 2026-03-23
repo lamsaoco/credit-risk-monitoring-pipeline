@@ -1,0 +1,40 @@
+# Set the Airflow home to the current directory
+export AIRFLOW_HOME=$(pwd)
+
+# Initialize the metadata database
+export AIRFLOW_HOME=$(pwd)
+uv run airflow db init
+uv run airflow db migrate
+
+# Create user for UI
+export AIRFLOW_HOME=$(pwd)
+uv run airflow users create \
+    --username admin \
+    --firstname Admin \
+    --lastname User \
+    --role Admin \
+    --email admin@example.com
+
+pass: 123456
+
+# Create the directory for your DAG files
+mkdir dags
+
+# Start the webserver in the background
+export AIRFLOW_HOME=$(pwd)
+uv run airflow webserver --port 8080 &
+
+# Start the scheduler
+export AIRFLOW_HOME=$(pwd)
+uv run airflow scheduler
+
+# Delete existing broken database and configs
+rm airflow.db airflow.cfg webserver_config.py
+
+# Kill any existing airflow webserver processes
+# Note: Use -9 to force kill if they are stubborn
+pkill -f "airflow webserver"
+
+# Remove the stale PID file
+# This file is what's blocking the new instance from starting
+rm /workspaces/credit-risk-monitoring-pipeline/airflow-webserver.pid

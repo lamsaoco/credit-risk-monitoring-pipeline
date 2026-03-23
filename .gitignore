@@ -1,8 +1,8 @@
-fred-api-key.txt
+*key*
 *ipynb_checkpoints*
-2024_lar.txt
+*lar*
 *.parquet*
 *SUCCESS*
 *aws*
-terraform/variables.tf
+*variables.tf*
 *.tfstate*

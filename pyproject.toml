@@ -5,7 +5,9 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "apache-airflow[amazon,apache-spark]==2.8.1",
     "boto3>=1.42.69",
+    "flask-session<0.6.0",
     "fredapi>=0.5.2",
     "pandas>=3.0.1",
     "pyspark>=4.1.1",
