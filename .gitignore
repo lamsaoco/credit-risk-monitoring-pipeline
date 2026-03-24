@@ -6,3 +6,8 @@
 *aws*
 *variables.tf*
 *.tfstate*
+logs/*
+airflow-webserver.pid
+webserver_config.py
+airflow.cfg
+airflow.db
