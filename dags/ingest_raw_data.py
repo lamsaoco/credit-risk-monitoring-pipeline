@@ -21,7 +21,8 @@ default_args = {
 def get_spark():
     """
     Initialize Spark session optimized for m7i-flex.large (8GB RAM).
-    Higher memory allocation for driver to handle large metadata efficiently.
+    Spark is used only for local CSV reading and processing — S3 upload is
+    handled separately via boto3, bypassing hadoop-aws entirely.
     """
     os.environ['PYSPARK_PYTHON'] = sys.executable
     os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
@@ -33,11 +34,7 @@ def get_spark():
         .config("spark.executor.memory", "2g") \
         .config("spark.memory.fraction", "0.6") \
         .config("spark.sql.shuffle.partitions", "50") \
-        .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.4") \
-        .config("spark.network.timeout", "60000") \
-        .config("spark.hadoop.fs.s3a.connection.timeout", "60000") \
-        .config("spark.hadoop.fs.s3a.attempts.maximum", "10") \
-        .config("spark.hadoop.fs.s3a.paging.maximum", "5000") \
+        .config("spark.sql.ansi.enabled", "false") \
         .getOrCreate()
 
 def send_status_email(status, task_name, year, details=""):
@@ -93,7 +90,7 @@ def ingest_hmda_raw_spark(**kwargs):
     """
     import os
     import sys
-    from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
+    from pyspark.sql.types import ShortType, IntegerType, DoubleType, StringType
     from pyspark.sql import functions as F
     import requests
     import zipfile
@@ -106,40 +103,35 @@ def ingest_hmda_raw_spark(**kwargs):
     year = kwargs.get('dag_run').conf.get('year', 2024)
     spark = get_spark()
 
-    # --- 1. DEFINE EXPLICIT SCHEMA (20 COLUMNS) ---
-    # Defining types upfront saves significant RAM and prevents I/O hanging
-    hmda_schema = StructType([
-        # 1-5: Identification & Geography
-        StructField("activity_year", IntegerType(), True),
-        StructField("lei", StringType(), True),
-        StructField("state_code", StringType(), True),
-        StructField("county_code", StringType(), True),
-        StructField("census_tract", StringType(), True),
-        
-        # 6-12: Loan Details
-        StructField("loan_type", IntegerType(), True),
-        StructField("loan_purpose", IntegerType(), True),
-        StructField("loan_amount", DoubleType(), True),
-        StructField("interest_rate", DoubleType(), True),
-        StructField("property_value", DoubleType(), True),
-        StructField("occupancy_type", IntegerType(), True),
-        StructField("total_loan_costs", DoubleType(), True),
-        
-        # 13-17: Borrower Financials
-        StructField("income", DoubleType(), True),
-        StructField("debt_to_income_ratio", StringType(), True), # Handled as string for ranges like '<20%'
-        StructField("applicant_credit_score_type", IntegerType(), True),
-        StructField("applicant_sex", IntegerType(), True),
-        StructField("applicant_age", StringType(), True),
-        
-        # 18-20: Result & Compliance
-        StructField("action_taken", IntegerType(), True),
-        StructField("hoepa_status", IntegerType(), True),
-        StructField("lien_status", IntegerType(), True)
-    ])
+    # Schema: https://ffiec.cfpb.gov/documentation/publications/loan-level-datasets/public-lar-schema
+    TARGET_SCHEMA = {
+        # Identification & Geography
+        "activity_year":             IntegerType(),   # 4-digit year
+        "lei":                       StringType(),    # 20-char LEI identifier
+        "state_code":                StringType(),    # 2-char FIPS state (e.g. "CA")
+        "county_code":               StringType(),    # 5-char FIPS county
+        "census_tract":              StringType(),    # 11-char census tract
+        # Loan Details
+        "loan_type":                 ShortType(),     # 1=Conventional, 2=FHA, 3=VA, 4=USDA
+        "loan_purpose":              ShortType(),     # 1=Purchase, 2=Improvement, 31=Refi…
+        "loan_amount":               DoubleType(),    # In dollars
+        "interest_rate":             DoubleType(),    # Percent; "NA"/"Exempt" → NULL
+        "property_value":            DoubleType(),    # In dollars; "NA"/"Exempt" → NULL
+        "occupancy_type":            ShortType(),     # 1=Principal, 2=Second, 3=Investment
+        "total_loan_costs":          DoubleType(),    # In dollars; "NA"/"Exempt" → NULL
+        # Borrower Financials
+        "income":                    IntegerType(),   # Annual income in $thousands; "NA" → NULL
+        "debt_to_income_ratio":      StringType(),    # Ranges: "<20%", "20%-<30%", "Exempt", "NA"…
+        "applicant_credit_score_type": ShortType(),  # 1-9 enum
+        "applicant_sex":             ShortType(),     # 1-6 enum
+        "applicant_age":             StringType(),    # Ranges: "25-34", "<25", ">74", "NA"…
+        # Outcome & Compliance
+        "action_taken":              ShortType(),     # 1=Originated, 2=Approved not accepted…
+        "hoepa_status":              ShortType(),     # 1=HOEPA, 2=Not HOEPA, 3=NA
+        "lien_status":               ShortType(),     # 1=First lien, 2=Subordinate lien
+    }
 
-    # List of columns to select for the final Parquet file
-    target_columns = [field.name for field in hmda_schema]
+    target_columns = list(TARGET_SCHEMA.keys())
 
     try:
         # 2. DATA ACQUISITION
@@ -159,32 +151,66 @@ def ingest_hmda_raw_spark(**kwargs):
             local_file = os.path.join(LOCAL_TMP_DIR, zip_ref.namelist()[0])
 
         # 3. SPARK PROCESSING
-        # Read with defined schema and pipe delimiter
-        df = spark.read.options(header='True', delimiter='|') \
-                  .schema(hmda_schema) \
-                  .csv(f"file://{local_file}")
-        
-        # Explicit Selection: Only keep the 20 columns defined in schema
-        # Filtering for successful originations (action_taken = 1)
-        df_final = df.select(*target_columns).filter(F.col("action_taken") == 1)
+        df_raw = spark.read \
+                      .option("header", "true") \
+                      .option("delimiter", "|") \
+                      .csv(f"file://{local_file}")
 
-        # 4. WRITE TO S3 (RAW ZONE)
-        # Partitioning by state_code is optimal for downstream regional analysis
-        s3_output = f"s3a://{s3_bucket}/raw/hmda_processed/{year}/"
-        print(f"Writing {len(target_columns)} columns to S3 as Parquet...")
-        
+        df_selected = df_raw.select(*target_columns)
+
+        df_filtered = df_selected.filter(F.col("action_taken") == "1")
+
+        df_final = df_filtered
+        for col_name, col_type in TARGET_SCHEMA.items():
+            if not isinstance(col_type, StringType):
+                df_final = df_final.withColumn(col_name, F.col(col_name).cast(col_type))
+
+
+        # 4. WRITE PARQUET LOCALLY, THEN UPLOAD TO S3 VIA BOTO3
+        local_parquet_dir = os.path.join(LOCAL_TMP_DIR, "hmda_parquet_output")
+        print(f"Writing {len(target_columns)} columns to local disk as Parquet...")
         df_final.write.mode("overwrite") \
                 .partitionBy("state_code") \
-                .parquet(s3_output)
-        
-        send_status_email("SUCCESS", "HMDA_Ingestion", year, 
-                          f"Successfully ingested {len(target_columns)} columns into Raw Zone.")
+                .parquet(f"file://{local_parquet_dir}")
+
+        print("Uploading partitioned Parquet files to S3 via boto3...")
+        import boto3
+        s3_client = boto3.client("s3")
+        s3_prefix = f"raw/hmda_processed/{year}/"
+
+        # Delete existing objects under the year prefix before re-uploading
+        paginator = s3_client.get_paginator("list_objects_v2")
+        existing_keys = [
+            {"Key": obj["Key"]}
+            for page in paginator.paginate(Bucket=s3_bucket, Prefix=s3_prefix)
+            for obj in page.get("Contents", [])
+        ]
+        if existing_keys:
+            print(f"Deleting {len(existing_keys)} existing objects under s3://{s3_bucket}/{s3_prefix}")
+            for i in range(0, len(existing_keys), 1000):
+                s3_client.delete_objects(
+                    Bucket=s3_bucket,
+                    Delete={"Objects": existing_keys[i:i + 1000]}
+                )
+
+        uploaded = 0
+        for root, dirs, files in os.walk(local_parquet_dir):
+            for fname in files:
+                local_path = os.path.join(root, fname)
+                rel_path = os.path.relpath(local_path, local_parquet_dir)
+                s3_key = s3_prefix + rel_path.replace("\\", "/")
+                s3_client.upload_file(local_path, s3_bucket, s3_key)
+                uploaded += 1
+
+        print(f"Uploaded {uploaded} files to s3://{s3_bucket}/{s3_prefix}")
+        send_status_email("SUCCESS", "HMDA_Ingestion", year,
+                          f"Ingested {len(target_columns)} columns, {uploaded} Parquet files uploaded to S3.")
 
     except Exception as e:
         send_status_email("FAILED", "HMDA_Ingestion", year, str(e))
         raise e
     finally:
-        # 5. CLEANUP
+        # 5. CLEANUP local temp dir and stop Spark
         if os.path.exists(LOCAL_TMP_DIR):
             shutil.rmtree(LOCAL_TMP_DIR)
         spark.stop()
