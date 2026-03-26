@@ -1,0 +1,13 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.ipynb
+.python-version
+uv.lock
+logs/
+terraform/
+Note.txt
+README.md
