@@ -11,3 +11,5 @@ airflow-webserver.pid
 webserver_config.py
 airflow.cfg
 airflow.db
+*airflow-webserver*
+*.pyc

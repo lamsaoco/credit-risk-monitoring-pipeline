@@ -1,0 +1,5 @@
+{
+  "fred_api_key": "your_actual_key_here",
+  "s3_bucket_name": "your_s3_bucket_name",
+  "email_receiver": "your_email@example.com"
+}
