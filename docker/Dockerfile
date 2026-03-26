@@ -17,8 +17,8 @@ RUN useradd -m -u 50000 -s /bin/bash airflow
 
 WORKDIR /opt/airflow
 
-# Build context is d:/DE-Project — copy from project subfolder
-COPY credit-risk-monitoring-pipeline/pyproject.toml credit-risk-monitoring-pipeline/uv.lock ./
+# Build context is .. (project root) — copy from there
+COPY pyproject.toml uv.lock ./
 
 RUN uv sync --frozen --no-dev && \
     mkdir -p dags logs plugins && \
