@@ -82,27 +82,72 @@ def ingest_fred_to_raw():
         print(f"❌ FRED Ingestion Error: {str(e)}")
         raise e
 
-# --- HMDA Spark Task ---
-def ingest_hmda_raw_spark(**kwargs):
+# --- HMDA Modular Tasks ---
+
+def get_hmda_workspace(year):
+    return f"/tmp/hmda_workspace_{year}"
+
+def download_hmda_data(**kwargs):
     """
-    High-performance Spark ETL for HMDA dataset on m7i-flex.large (8GB RAM).
-    Processes 20 specific columns with an explicit schema to skip inferSchema overhead.
+    Task 1: Download and extract the HMDA LAR ZIP file.
+    Returns the extracted CSV filename via XCom.
+    """
+    import os
+    import requests
+    import zipfile
+    
+    conf = kwargs.get('dag_run').conf or {}
+    year = conf.get('year', 2024)
+    workspace = get_hmda_workspace(year)
+    os.makedirs(workspace, exist_ok=True)
+    
+    download_url = f"https://files.ffiec.cfpb.gov/dynamic-data/{year}/{year}_lar.zip"
+    zip_path = os.path.join(workspace, f"hmda_{year}.zip")
+    
+    print(f"Downloading HMDA {year} dataset...")
+    with requests.get(download_url, stream=True) as r:
+        r.raise_for_status()
+        with open(zip_path, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=1024*1024):
+                f.write(chunk)
+    
+    print("Extracting ZIP...")
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(workspace)
+        extracted_csv = zip_ref.namelist()[0]
+    
+    csv_path = os.path.join(workspace, extracted_csv)
+    print(f"Extracted CSV to {csv_path}")
+    
+    # Pass the filename down to the next task
+    return extracted_csv
+
+def process_hmda_spark(**kwargs):
+    """
+    Task 2: PySpark ETL. Reads the downloaded CSV, filters, casts to Parquet,
+    and partitions the local output.
     """
     import os
     import sys
     from pyspark.sql.types import ShortType, IntegerType, DoubleType, StringType
     from pyspark.sql import functions as F
-    import requests
-    import zipfile
-
+    
     # Ensure Spark uses the correct Python interpreter from .venv
     os.environ['PYSPARK_PYTHON'] = sys.executable
     os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
-
-    s3_bucket = Variable.get("s3_bucket_name")
-    year = kwargs.get('dag_run').conf.get('year', 2024)
-    spark = get_spark()
-
+    
+    conf = kwargs.get('dag_run').conf or {}
+    year = conf.get('year', 2024)
+    workspace = get_hmda_workspace(year)
+    
+    # Pull the CSV filename from the download task
+    ti = kwargs['ti']
+    extracted_csv = ti.xcom_pull(task_ids='download_hmda_data')
+    if not extracted_csv:
+        raise ValueError("No extracted CSV returned from download_hmda_data task!")
+        
+    local_file = os.path.join(workspace, extracted_csv)
+    
     # Schema: https://ffiec.cfpb.gov/documentation/publications/loan-level-datasets/public-lar-schema
     TARGET_SCHEMA = {
         # Identification & Geography
@@ -130,34 +175,17 @@ def ingest_hmda_raw_spark(**kwargs):
         "hoepa_status":              ShortType(),     # 1=HOEPA, 2=Not HOEPA, 3=NA
         "lien_status":               ShortType(),     # 1=First lien, 2=Subordinate lien
     }
-
     target_columns = list(TARGET_SCHEMA.keys())
 
+    spark = get_spark()
     try:
-        # 2. DATA ACQUISITION
-        os.makedirs(LOCAL_TMP_DIR, exist_ok=True)
-        download_url = f"https://files.ffiec.cfpb.gov/dynamic-data/{year}/{year}_lar.zip"
-        zip_path = os.path.join(LOCAL_TMP_DIR, f"hmda_{year}.zip")
-        
-        print(f"Downloading HMDA {year} dataset...")
-        with requests.get(download_url, stream=True) as r:
-            r.raise_for_status()
-            with open(zip_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=1024*1024):
-                    f.write(chunk)
-        
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(LOCAL_TMP_DIR)
-            local_file = os.path.join(LOCAL_TMP_DIR, zip_ref.namelist()[0])
-
-        # 3. SPARK PROCESSING
+        print(f"Reading CSV: {local_file}")
         df_raw = spark.read \
                       .option("header", "true") \
                       .option("delimiter", "|") \
                       .csv(f"file://{local_file}")
 
         df_selected = df_raw.select(*target_columns)
-
         df_filtered = df_selected.filter(F.col("action_taken") == "1")
 
         df_final = df_filtered
@@ -165,75 +193,134 @@ def ingest_hmda_raw_spark(**kwargs):
             if not isinstance(col_type, StringType):
                 df_final = df_final.withColumn(col_name, F.col(col_name).cast(col_type))
 
-
-        # 4. WRITE PARQUET LOCALLY, THEN UPLOAD TO S3 VIA BOTO3
-        local_parquet_dir = os.path.join(LOCAL_TMP_DIR, "hmda_parquet_output")
+        local_parquet_dir = os.path.join(workspace, "hmda_parquet_output")
         print(f"Writing {len(target_columns)} columns to local disk as Parquet...")
         df_final.write.mode("overwrite") \
                 .partitionBy("state_code") \
                 .parquet(f"file://{local_parquet_dir}")
-
-        print("Uploading partitioned Parquet files to S3 via boto3...")
-        import boto3
-        s3_client = boto3.client("s3")
-        s3_prefix = f"raw/hmda_processed/{year}/"
-
-        # Delete existing objects under the year prefix before re-uploading
-        paginator = s3_client.get_paginator("list_objects_v2")
-        existing_keys = [
-            {"Key": obj["Key"]}
-            for page in paginator.paginate(Bucket=s3_bucket, Prefix=s3_prefix)
-            for obj in page.get("Contents", [])
-        ]
-        if existing_keys:
-            print(f"Deleting {len(existing_keys)} existing objects under s3://{s3_bucket}/{s3_prefix}")
-            for i in range(0, len(existing_keys), 1000):
-                s3_client.delete_objects(
-                    Bucket=s3_bucket,
-                    Delete={"Objects": existing_keys[i:i + 1000]}
-                )
-
-        uploaded = 0
-        for root, dirs, files in os.walk(local_parquet_dir):
-            for fname in files:
-                local_path = os.path.join(root, fname)
-                rel_path = os.path.relpath(local_path, local_parquet_dir)
-                s3_key = s3_prefix + rel_path.replace("\\", "/")
-                s3_client.upload_file(local_path, s3_bucket, s3_key)
-                uploaded += 1
-
-        print(f"Uploaded {uploaded} files to s3://{s3_bucket}/{s3_prefix}")
-        send_status_email("SUCCESS", "HMDA_Ingestion", year,
-                          f"Ingested {len(target_columns)} columns, {uploaded} Parquet files uploaded to S3.")
-
-    except Exception as e:
-        send_status_email("FAILED", "HMDA_Ingestion", year, str(e))
-        raise e
+                
+        # Return count for the email report later
+        return len(target_columns)
+        
     finally:
-        # 5. CLEANUP local temp dir and stop Spark
-        if os.path.exists(LOCAL_TMP_DIR):
-            shutil.rmtree(LOCAL_TMP_DIR)
         spark.stop()
+
+def upload_hmda_s3(**kwargs):
+    """
+    Task 3: Upload the local Parquet directory to AWS S3.
+    """
+    import os
+    import boto3
+    from airflow.models import Variable
+    
+    conf = kwargs.get('dag_run').conf or {}
+    year = conf.get('year', 2024)
+    workspace = get_hmda_workspace(year)
+    local_parquet_dir = os.path.join(workspace, "hmda_parquet_output")
+    
+    s3_bucket = Variable.get("s3_bucket_name")
+    s3_client = boto3.client("s3")
+    s3_prefix = f"raw/hmda_processed/{year}/"
+
+    print(f"Checking existing objects under s3://{s3_bucket}/{s3_prefix}")
+    paginator = s3_client.get_paginator("list_objects_v2")
+    existing_keys = [
+        {"Key": obj["Key"]}
+        for page in paginator.paginate(Bucket=s3_bucket, Prefix=s3_prefix)
+        for obj in page.get("Contents", [])
+    ]
+    if existing_keys:
+        print(f"Deleting {len(existing_keys)} existing objects...")
+        for i in range(0, len(existing_keys), 1000):
+            s3_client.delete_objects(
+                Bucket=s3_bucket,
+                Delete={"Objects": existing_keys[i:i + 1000]}
+            )
+
+    print("Uploading partitioned Parquet files to S3 via boto3...")
+    uploaded = 0
+    for root, dirs, files in os.walk(local_parquet_dir):
+        for fname in files:
+            local_path = os.path.join(root, fname)
+            rel_path = os.path.relpath(local_path, local_parquet_dir)
+            s3_key = s3_prefix + rel_path.replace("\\", "/")
+            s3_client.upload_file(local_path, s3_bucket, s3_key)
+            uploaded += 1
+
+    print(f"Uploaded {uploaded} files to s3://{s3_bucket}/{s3_prefix}")
+    
+    ti = kwargs['ti']
+    col_count = ti.xcom_pull(task_ids='process_hmda_spark') or 20
+    
+    send_status_email("SUCCESS", "HMDA_Ingestion_Modular", year,
+                      f"Ingested {col_count} columns, {uploaded} partitioned Parquet files uploaded to S3.")
+
+def cleanup_hmda_local(**kwargs):
+    """
+    Task 4: Cleanup local working directory to free up disk space.
+    Runs even if prior tasks failed.
+    """
+    import os
+    import shutil
+    
+    conf = kwargs.get('dag_run').conf or {}
+    year = conf.get('year') or kwargs.get('logical_date').year
+    workspace = get_hmda_workspace(year)
+    
+    if os.path.exists(workspace):
+        print(f"Removing local workspace: {workspace}")
+        shutil.rmtree(workspace)
+        print("Cleanup complete.")
+    else:
+        print(f"Workspace {workspace} doesn't exist. Nothing to clean.")
 
 # --- DAG Definition ---
 with DAG(
     'credit_risk_master_ingestion',
     default_args=default_args,
-    description='Master Ingestion: FRED API & HMDA Spark with 8GB RAM Optimization',
+    description='Master Ingestion: FRED API & Modular HMDA Spark on LocalExecutor',
     schedule_interval='@yearly',
-    catchup=False
+    catchup=False,
+    params={
+        "year": 2024
+    }
 ) as dag:
 
+    # Independent FRED ingestion task
     task_fred = PythonOperator(
         task_id='ingest_fred_api',
         python_callable=ingest_fred_to_raw
     )
 
-    task_hmda = PythonOperator(
-        task_id='ingest_hmda_spark',
-        python_callable=ingest_hmda_raw_spark,
+    # Modular HMDA pipeline tasks
+    task_dl_hmda = PythonOperator(
+        task_id='download_hmda_data',
+        python_callable=download_hmda_data,
         provide_context=True
     )
 
-    # Running in parallel to leverage m7i-flex.large resources
-    [task_fred, task_hmda]
+    task_spark_hmda = PythonOperator(
+        task_id='process_hmda_spark',
+        python_callable=process_hmda_spark,
+        provide_context=True
+    )
+
+    task_s3_hmda = PythonOperator(
+        task_id='upload_hmda_s3',
+        python_callable=upload_hmda_s3,
+        provide_context=True
+    )
+    
+    task_clean_hmda = PythonOperator(
+        task_id='cleanup_hmda_local',
+        python_callable=cleanup_hmda_local,
+        provide_context=True,
+        trigger_rule='all_done' # Ensure cleanup runs even if upload or process fails
+    )
+
+    # Define execution graph
+    # FRED drops directly into S3 independently
+    task_fred
+    
+    # HMDA runs sequentially to minimize concurrent RAM usage and manage data handoff
+    task_dl_hmda >> task_spark_hmda >> task_s3_hmda >> task_clean_hmda

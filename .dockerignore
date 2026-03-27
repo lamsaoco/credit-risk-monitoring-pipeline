@@ -6,6 +6,5 @@
 **/logs/
 **/plugins/
 .venv/
-uv.lock
 Note.txt
 terraform/

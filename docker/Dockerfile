@@ -1,9 +1,9 @@
-FROM python:3.12-slim
+FROM python:3.12-bookworm
 
 USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openjdk-17-jdk-headless \
+    openjdk-17-jre-headless \
     curl \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 

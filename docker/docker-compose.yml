@@ -2,7 +2,7 @@ version: '3.8'
 
 x-airflow-common: &airflow-common
   build:
-    context: ..                      # d:/DE-Project/ — contains both docker/ and credit-risk-monitoring-pipeline/
+    context: .. # d:/DE-Project/ — contains both docker/ and credit-risk-monitoring-pipeline/
     dockerfile: docker/Dockerfile
   env_file: .env
   environment:
@@ -12,15 +12,25 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
   volumes:
-    - ../dags:/opt/airflow/dags
-    - ../logs:/opt/airflow/logs
-    - ../plugins:/opt/airflow/plugins
+    - ../airflow/dags:/opt/airflow/dags
+    - ../airflow/logs:/opt/airflow/logs
+    - ../airflow/plugins:/opt/airflow/plugins
   depends_on:
     postgres:
       condition: service_healthy
+    airflow-setup:
+      condition: service_completed_successfully
   restart: unless-stopped
 
 services:
+  airflow-setup:
+    image: debian:bookworm-slim
+    user: "0:0"
+    volumes:
+      - ..:/project
+    command: >
+      bash -c "mkdir -p /project/airflow/dags /project/airflow/logs /project/airflow/plugins && chmod -R 777 /project/airflow/dags /project/airflow/logs /project/airflow/plugins"
+
   postgres:
     image: postgres:15
     env_file: .env
@@ -31,42 +41,55 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
+      test: [ "CMD", "pg_isready", "-U", "${POSTGRES_USER}" ]
       interval: 5s
       retries: 10
     restart: unless-stopped
 
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    env_file: .env
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@pgadmin.org}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
   airflow-init:
     <<: *airflow-common
-    command: >
-      bash -c "
-        airflow db upgrade &&
-        airflow users create
-          --username $$AIRFLOW_WWW_USER_USERNAME
-          --password $$AIRFLOW_WWW_USER_PASSWORD
-          --firstname Admin
-          --lastname User
-          --role Admin
-          --email $$AIRFLOW__SMTP__SMTP_USER
-      "
+    command:
+      - bash
+      - -c
+      - |
+        airflow db upgrade && \
+        airflow users create \
+          --username "$${AIRFLOW_WWW_USER_USERNAME}" \
+          --password "$${AIRFLOW_WWW_USER_PASSWORD}" \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email "$${AIRFLOW__SMTP__SMTP_USER}"
     restart: on-failure
 
   airflow-webserver:
     <<: *airflow-common
-    command: webserver
+    command: airflow webserver
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      test: [ "CMD", "curl", "--fail", "http://localhost:8080/health" ]
       interval: 30s
       timeout: 10s
       retries: 5
 
   airflow-scheduler:
     <<: *airflow-common
-    command: scheduler
+    command: airflow scheduler
     healthcheck:
-      test: ["CMD", "airflow", "jobs", "check", "--job-type", "SchedulerJob", "--limit", "1"]
+      test: [ "CMD", "airflow", "jobs", "check", "--job-type", "SchedulerJob", "--limit", "1" ]
       interval: 30s
       timeout: 10s
       retries: 5
