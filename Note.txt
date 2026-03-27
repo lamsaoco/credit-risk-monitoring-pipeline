@@ -38,3 +38,25 @@ pkill -f "airflow webserver"
 # Remove the stale PID file
 # This file is what's blocking the new instance from starting
 rm /workspaces/credit-risk-monitoring-pipeline/airflow-webserver.pid
+
+# 1. Build image
+docker compose build
+
+# 2. Khởi động tất cả services
+docker compose up airflow-init
+docker compose up -d
+
+# 3. Kiểm tra services healthy
+docker compose ps
+
+# 4. Kiểm tra Java + PySpark trong container
+docker compose exec airflow-scheduler python -c "import pyspark; print(pyspark.__version__)"
+docker compose exec airflow-scheduler java -version
+
+
+### Manual Verification
+1. Mở `http://localhost:8080` → đăng nhập `admin/admin`
+2. Vào **Admin → Variables** → add `s3_bucket_name`, `email_receiver`, `fred_api_key`
+3. Trigger DAG `credit_risk_master_ingestion` với config `{"year": 2024}`
+4. Kiểm tra log task `ingest_hmda_spark` — phải thấy "Uploading partitioned Parquet files"
+
