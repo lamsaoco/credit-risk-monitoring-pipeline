@@ -13,4 +13,4 @@ airflow.cfg
 airflow.db
 *airflow-webserver*
 *.pyc
-airflow/airflow_variables.json
+*airflow_variables.json
