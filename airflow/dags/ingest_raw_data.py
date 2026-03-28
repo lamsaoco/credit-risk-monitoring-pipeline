@@ -1,6 +1,7 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.models import Variable
+from airflow.models.param import Param
 from airflow.utils.email import send_email
 from datetime import datetime, timedelta
 import os
@@ -282,7 +283,7 @@ with DAG(
     schedule_interval='@yearly',
     catchup=False,
     params={
-        "year": 2024
+        "year": Param(2024, type="integer", title="Ingestion Year")
     }
 ) as dag:
 
