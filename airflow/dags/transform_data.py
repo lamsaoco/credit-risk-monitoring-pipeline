@@ -102,7 +102,7 @@ def enrich_mortgage_features_spark(**kwargs):
     os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
     
     spark = SparkSession.builder \
-        .appName(f"Mortgage_Silver_Enrichment_{year}") \
+        .appName(f"Mortgage_Staging_Enrichment_{year}") \
         .config("spark.driver.memory", "4g") \
         .getOrCreate()
 
@@ -137,7 +137,7 @@ def enrich_mortgage_features_spark(**kwargs):
 
         # D. BROADCAST JOIN & SPREAD ANALYSIS (Task 3.1)
         # Using Broadcast Join for the small FRED table to optimize 12M row processing
-        silver_layer = mortgage_enriched.join(
+        staging_layer = mortgage_enriched.join(
             F.broadcast(fred_benchmark),
             mortgage_enriched.activity_year == fred_benchmark.yr,
             "left"
@@ -145,7 +145,7 @@ def enrich_mortgage_features_spark(**kwargs):
 
         # E. PERSISTENCE (Local Disk)
         output_path = os.path.join(workspace, f"staging/mortgage_curated/{year}")
-        silver_layer.write.mode("overwrite") \
+        staging_layer.write.mode("overwrite") \
                     .partitionBy("state_code") \
                     .parquet(f"file://{output_path}")
         
@@ -155,7 +155,7 @@ def enrich_mortgage_features_spark(**kwargs):
         spark.stop()
 
 # --- TASK 4: UPLOAD ENRICHED DATA TO S3 ---
-def upload_silver_to_s3(**kwargs):
+def upload_staging_to_s3(**kwargs):
     conf = kwargs.get('dag_run').conf or {}
     year = conf.get('year') or kwargs.get('logical_date').year
     bucket = Variable.get("s3_bucket_name")
@@ -184,7 +184,7 @@ def upload_silver_to_s3(**kwargs):
             print(f"Uploaded {s3_key} to S3")
 
 # --- TASK 5: LOCAL CLEANUP ---
-def cleanup_silver_local(**kwargs):
+def cleanup_staging_local(**kwargs):
     conf = kwargs.get('dag_run').conf or {}
     year = conf.get('year') or kwargs.get('logical_date').year
     workspace = get_staging_workspace(year)
@@ -195,12 +195,12 @@ def cleanup_silver_local(**kwargs):
 
 # --- DAG Orchestration ---
 with DAG(
-    'mortgage_risk_silver_enrichment',
+    'mortgage_risk_staging_enrichment',
     default_args=default_args,
     description='Enriches 12M Mortgage records with Market Rates and Risk Ratios',
     schedule_interval='@yearly', # Automatically runs each year
     catchup=False,
-    tags=['mortgage', 'silver', 'spark'],
+    tags=['mortgage', 'staging', 'spark'],
     params={
         "year": Param(2024, type="integer", title="Processing Year")
     }
@@ -225,14 +225,14 @@ with DAG(
     )
 
     t4 = PythonOperator(
-        task_id='upload_silver_to_s3',
-        python_callable=upload_silver_to_s3,
+        task_id='upload_staging_to_s3',
+        python_callable=upload_staging_to_s3,
         provide_context=True
     )
 
     t5 = PythonOperator(
-        task_id='cleanup_silver_local',
-        python_callable=cleanup_silver_local,
+        task_id='cleanup_staging_local',
+        python_callable=cleanup_staging_local,
         provide_context=True,
         trigger_rule="all_done"
     )
