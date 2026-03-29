@@ -10,8 +10,8 @@ import sys
 import shutil
 import boto3
 
-def get_silver_workspace(year):
-    return f"/tmp/mortgage_silver_workspace_{year}"
+def get_staging_workspace(year):
+    return f"/tmp/mortgage_staging_workspace_{year}"
 
 # --- Professional Failure Notification ---
 def notify_pipeline_failure(context):
@@ -23,7 +23,7 @@ def notify_pipeline_failure(context):
     exception = context.get('exception')
     
     receiver = Variable.get("email_receiver")
-    subject = f"⚠️ [INCIDENT] Mortgage Silver Enrichment Failed: {ti.task_id}"
+    subject = f"⚠️ [INCIDENT] Mortgage Staging Enrichment Failed: {ti.task_id}"
     
     html_content = f"""
     <h3>Mortgage Data Pipeline - Failure Alert</h3>
@@ -65,7 +65,7 @@ def download_raw_to_local_boto3(**kwargs):
     conf = kwargs.get('dag_run').conf or {}
     year = conf.get('year') or kwargs.get('logical_date').year
     bucket = Variable.get("s3_bucket_name")
-    workspace = get_silver_workspace(year)
+    workspace = get_staging_workspace(year)
     
     s3 = boto3.client('s3')
     
@@ -95,7 +95,7 @@ def enrich_mortgage_features_spark(**kwargs):
     # Dynamic year logic as requested
     conf = kwargs.get('dag_run').conf or {}
     year = conf.get('year') or kwargs.get('logical_date').year
-    workspace = get_silver_workspace(year)
+    workspace = get_staging_workspace(year)
 
     # Spark Optimization for m7i-flex.large (8GB RAM)
     os.environ['PYSPARK_PYTHON'] = sys.executable
@@ -159,7 +159,7 @@ def upload_silver_to_s3(**kwargs):
     conf = kwargs.get('dag_run').conf or {}
     year = conf.get('year') or kwargs.get('logical_date').year
     bucket = Variable.get("s3_bucket_name")
-    workspace = get_silver_workspace(year)
+    workspace = get_staging_workspace(year)
     
     s3 = boto3.client('s3')
     local_output_dir = os.path.join(workspace, f"staging/mortgage_curated/{year}")
@@ -187,7 +187,7 @@ def upload_silver_to_s3(**kwargs):
 def cleanup_silver_local(**kwargs):
     conf = kwargs.get('dag_run').conf or {}
     year = conf.get('year') or kwargs.get('logical_date').year
-    workspace = get_silver_workspace(year)
+    workspace = get_staging_workspace(year)
     
     if os.path.exists(workspace):
         shutil.rmtree(workspace)
