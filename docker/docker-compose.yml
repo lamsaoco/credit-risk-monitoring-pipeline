@@ -56,6 +56,25 @@ services:
       - "5050:80"
     depends_on:
       - postgres
+      - postgres-dw
+    restart: unless-stopped
+
+  # ── Data Warehouse PostgreSQL (separate from Airflow metadata) ──
+  postgres-dw:
+    image: postgres:15
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${DW_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${DW_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${DW_POSTGRES_DB:-credit_risk_dw}
+    volumes:
+      - dw_postgres_data:/var/lib/postgresql/data
+      # DDL: auto-creates credit_risk schema & stg_loans table on first start
+      - ../warehouse/postgres/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "${DW_POSTGRES_USER}" ]
+      interval: 5s
+      retries: 10
     restart: unless-stopped
 
   airflow-init:
@@ -96,3 +115,4 @@ services:
 
 volumes:
   postgres_data:
+  dw_postgres_data:
