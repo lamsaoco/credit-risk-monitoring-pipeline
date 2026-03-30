@@ -156,17 +156,16 @@ def load_to_warehouse(**kwargs):
 
 def _load_postgres(df, year: int):
     """Load DataFrame into PostgreSQL credit_risk.stg_loans."""
-    from airflow.hooks.base import BaseHook
+    import os
     import psycopg2
     from psycopg2.extras import execute_values
 
-    conn_info = BaseHook.get_connection("postgres_dw")
     conn = psycopg2.connect(
-        host=conn_info.host,
-        port=conn_info.port or 5432,
-        dbname=conn_info.schema,
-        user=conn_info.login,
-        password=conn_info.password,
+        host="postgres-dw",
+        port=5432,
+        dbname=os.getenv("DW_POSTGRES_DB", "credit_risk_dw"),
+        user=os.getenv("DW_POSTGRES_USER"),
+        password=os.getenv("DW_POSTGRES_PASSWORD"),
     )
 
     # Columns that exist in both parquet and the target table
