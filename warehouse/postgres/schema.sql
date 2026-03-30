@@ -27,16 +27,16 @@ CREATE TABLE IF NOT EXISTS credit_risk.stg_loans (
     census_tract            VARCHAR(11),
 
     -- Loan Details
-    loan_type               SMALLINT,
-    loan_purpose            SMALLINT,
+    loan_type               INT,
+    loan_purpose            INT,
     loan_amount             DOUBLE PRECISION,
     interest_rate           DOUBLE PRECISION,
     property_value          DOUBLE PRECISION,
-    occupancy_type          SMALLINT,
-    lien_status             SMALLINT,
+    occupancy_type          INT,
+    lien_status             INT,
 
     -- Borrower Financials
-    income                  INT,
+    income                  BIGINT,
     applicant_age           VARCHAR(10),
 
     -- Computed Risk Metrics (from Spark enrichment)

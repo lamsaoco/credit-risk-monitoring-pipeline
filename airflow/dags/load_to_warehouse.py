@@ -181,7 +181,17 @@ def _load_postgres(df, year: int):
 
     # Filter to only available columns (defensive)
     available = [c for c in target_columns if c in df.columns]
-    df_insert = df[available]
+    df_insert = df[available].copy()
+
+    # Pre-processing: Ensure NaNs in integer columns are handled and types match Postgres
+    # (Pandas often defaults to float64 for columns with NaNs, which can cause issues)
+    int_cols = ["loan_type", "loan_purpose", "occupancy_type", "lien_status", "data_year", "activity_year"]
+    for col in int_cols:
+        if col in df_insert.columns:
+            df_insert[col] = df_insert[col].fillna(0).astype(int)
+
+    if "income" in df_insert.columns:
+        df_insert["income"] = df_insert["income"].fillna(0).astype(float).astype(int)
 
     with conn:
         with conn.cursor() as cur:
@@ -218,14 +228,27 @@ def _load_postgres(df, year: int):
                 PARTITION OF credit_risk.stg_loans_y{year} DEFAULT;
             """)
 
-            rows = [tuple(r) for r in df_insert.itertuples(index=False)]
+            # 5. Execute Values with Progress Tracking
+            total_rows = len(df_insert)
+            chunk_size = 100000  # Print progress every 100k rows
             cols = ", ".join(available)
-            execute_values(
-                cur,
-                f"INSERT INTO credit_risk.stg_loans ({cols}) VALUES %s",
-                rows,
-                page_size=5000,
-            )
+            insert_query = f"INSERT INTO credit_risk.stg_loans ({cols}) VALUES %s"
+
+            print(f"   🚀 Starting insert of {total_rows:,} rows...")
+
+            for i in range(0, total_rows, chunk_size):
+                chunk = df_insert.iloc[i : i + chunk_size]
+                execute_values(
+                    cur,
+                    insert_query,
+                    chunk.itertuples(index=False, name=None),
+                    page_size=10000,
+                )
+                
+                rows_done = min(i + chunk_size, total_rows)
+                percent = (rows_done / total_rows) * 100
+                print(f"   ➡️ Progress: {percent:6.1f}% | Processed {rows_done:9,} / {total_rows:,} rows")
+
     conn.close()
 
 
@@ -237,6 +260,7 @@ def _load_snowflake(df, year: int):
     import snowflake.connector
     from snowflake.connector.pandas_tools import write_pandas
 
+    print(f"   ❄️ Connecting to Snowflake...")
     conn_info = BaseHook.get_connection("snowflake_default")
 
     extra = conn_info.extra_dejson
@@ -250,11 +274,38 @@ def _load_snowflake(df, year: int):
         role=extra.get("role", "SYSADMIN"),
     )
 
-    # Snowflake expects uppercase column names
-    df.columns = [c.upper() for c in df.columns]
-    df["DATA_YEAR"] = year
+    # Pre-processing: Handle types and NaNs for Snowflake
+    df_sf = df.copy()
+    df_sf.columns = [c.upper() for c in df_sf.columns]
+    df_sf["DATA_YEAR"] = year
 
-    write_pandas(sf_conn, df, "STG_LOANS", auto_create_table=False)
+    # Ensure integer columns don't have NaNs causing float issues
+    int_cols = ["LOAN_TYPE", "LOAN_PURPOSE", "OCCUPANCY_TYPE", "LIEN_STATUS", "DATA_YEAR", "ACTIVITY_YEAR"]
+    for col in int_cols:
+        if col in df_sf.columns:
+            df_sf[col] = df_sf[col].fillna(0).astype(int)
+
+    total_rows = len(df_sf)
+    chunk_size = 500000  # Larger chunks for Snowflake (efficient bulk load)
+
+    print(f"   🚀 Starting bulk upload to Snowflake ({total_rows:,} rows)...")
+
+    for i in range(0, total_rows, chunk_size):
+        chunk = df_sf.iloc[i : i + chunk_size]
+        success, nchunks, nrows, _ = write_pandas(
+            conn=sf_conn,
+            df=chunk,
+            table_name="STG_LOANS",
+            auto_create_table=False
+        )
+        
+        if not success:
+            raise RuntimeError(f"Snowflake load failed at row {i}")
+
+        rows_done = min(i + chunk_size, total_rows)
+        percent = (rows_done / total_rows) * 100
+        print(f"   ➡️ Progress: {percent:6.1f}% | Uploaded {rows_done:9,} / {total_rows:,} rows")
+
     sf_conn.close()
 
 

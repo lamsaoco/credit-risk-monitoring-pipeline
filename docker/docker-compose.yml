@@ -41,7 +41,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD", "pg_isready", "-U", "${POSTGRES_USER}" ]
+      test: [ "CMD", "pg_isready", "-U", "${POSTGRES_USER}", "-d", "${POSTGRES_DB}" ]
       interval: 5s
       retries: 10
     restart: unless-stopped
@@ -72,7 +72,7 @@ services:
       # DDL: auto-creates credit_risk schema & stg_loans table on first start
       - ../warehouse/postgres/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
     healthcheck:
-      test: [ "CMD", "pg_isready", "-U", "${DW_POSTGRES_USER}" ]
+      test: [ "CMD", "pg_isready", "-U", "${DW_POSTGRES_USER}", "-d", "${DW_POSTGRES_DB:-credit_risk_dw}" ]
       interval: 5s
       retries: 10
     restart: unless-stopped
