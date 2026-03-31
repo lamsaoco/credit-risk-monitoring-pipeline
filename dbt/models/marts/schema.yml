@@ -1,0 +1,24 @@
+
+version: 2
+
+models:
+  - name: fct_loan_risk
+    description: "Final fact table for analytics. Contains loan details, borrower metrics, and calculated risk segments."
+    columns:
+      - name: id
+        description: "Primary key"
+        tests:
+          - unique
+          - not_null
+
+      - name: risk_segment
+        description: "Calculated risk category: Low, Medium, High"
+        tests:
+          - accepted_values:
+              values: ['Low', 'Medium', 'High']
+
+      - name: cost_category
+        description: "Comparison of interest rate vs market benchmarks"
+        tests:
+          - accepted_values:
+              values: ['High Cost', 'Market/Subsidized']

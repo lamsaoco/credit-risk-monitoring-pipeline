@@ -1,0 +1,13 @@
+
+credit_risk_profile:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: postgres-dw
+      user: "{{ env_var('DW_POSTGRES_USER') }}"
+      password: "{{ env_var('DW_POSTGRES_PASSWORD') }}"
+      port: 5432
+      dbname: "{{ env_var('DW_POSTGRES_DB', 'credit_risk_dw') }}"
+      schema: credit_risk
+      threads: 4

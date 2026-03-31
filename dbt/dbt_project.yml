@@ -1,0 +1,35 @@
+
+# Name of the project
+name: 'credit_risk_dw'
+version: '1.0.0'
+config-version: 2
+
+# Profile to use (matches profiles.yml)
+profile: 'credit_risk_profile'
+
+# Model directories
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Configure models
+models:
+  credit_risk_dw:
+    staging:
+      +schema: credit_risk
+      +materialized: view
+    marts:
+      +schema: prod
+      +materialized: table
+
+seeds:
+  credit_risk_dw:
+    +schema: credit_risk

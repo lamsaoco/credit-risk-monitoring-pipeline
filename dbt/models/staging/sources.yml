@@ -1,0 +1,17 @@
+
+version: 2
+
+sources:
+  - name: credit_risk_source
+    database: "{{ env_var('DW_POSTGRES_DB', 'credit_risk_dw') }}"
+    schema: credit_risk
+    tables:
+      - name: stg_loans
+        description: "Raw staging table for HMDA loan data enriched with FRED interest rates."
+        columns:
+          - name: data_year
+            tests:
+              - not_null
+          - name: state_code
+            tests:
+              - not_null
