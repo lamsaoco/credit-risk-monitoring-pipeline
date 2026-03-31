@@ -70,6 +70,8 @@ services:
       POSTGRES_USER: ${DW_POSTGRES_USER}
       POSTGRES_PASSWORD: ${DW_POSTGRES_PASSWORD}
       POSTGRES_DB: ${DW_POSTGRES_DB:-credit_risk_dw}
+    ports:
+      - "5433:5432"
     volumes:
       - dw_postgres_data:/var/lib/postgresql/data
       # DDL: auto-creates credit_risk schema & stg_loans table on first start
@@ -124,9 +126,27 @@ services:
       - ../dbt:/usr/app/dbt
     working_dir: /usr/app/dbt
     entrypoint: [ "dbt" ]
+    command: [ "debug" ] # Default command to avoid just printing help
     depends_on:
       postgres-dw:
         condition: service_healthy
+
+  # ── dbt Documentation UI ──
+  dbt-docs:
+    image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
+    env_file: .env
+    volumes:
+      - ../dbt:/usr/app/dbt
+    working_dir: /usr/app/dbt
+    ports:
+      - "8081:8080"
+    restart: unless-stopped
+    entrypoint:
+      - sh
+      - -c
+      - "dbt docs generate && dbt docs serve --host 0.0.0.0 --port 8080"
+    depends_on:
+      - dbt
 
 volumes:
   postgres_data:
