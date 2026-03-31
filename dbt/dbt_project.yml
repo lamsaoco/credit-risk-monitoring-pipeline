@@ -24,7 +24,7 @@ clean-targets:
 models:
   credit_risk_dw:
     staging:
-      +schema: credit_risk
+      +schema: stg
       +materialized: view
     marts:
       +schema: prod
@@ -32,4 +32,4 @@ models:
 
 seeds:
   credit_risk_dw:
-    +schema: credit_risk
+    +schema: lookup

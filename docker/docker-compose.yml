@@ -31,8 +31,9 @@ services:
     user: "0:0"
     volumes:
       - ..:/project
+      - /var/run/docker.sock:/var/run/docker.sock
     command: >
-      bash -c "mkdir -p /project/airflow/dags /project/airflow/logs /project/airflow/plugins && chmod -R 777 /project/airflow/dags /project/airflow/logs /project/airflow/plugins"
+      bash -c "chmod 666 /var/run/docker.sock && mkdir -p /project/airflow/dags /project/airflow/logs /project/airflow/plugins && chmod -R 777 /project/airflow/dags /project/airflow/logs /project/airflow/plugins"
 
   postgres:
     image: postgres:15
@@ -122,8 +123,12 @@ services:
   dbt:
     image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
     env_file: .env
+    environment:
+      # Tell dbt where to find profiles.yml (same folder as the project)
+      DBT_PROFILES_DIR: /usr/app/dbt
     volumes:
-      - ../dbt:/usr/app/dbt
+      # Use HOST_PROJECT_ROOT so Docker daemon on the host can resolve the path correctly (DooD pattern)
+      - ${HOST_PROJECT_ROOT}/dbt:/usr/app/dbt
     working_dir: /usr/app/dbt
     entrypoint: [ "dbt" ]
     command: [ "debug" ] # Default command to avoid just printing help
@@ -135,8 +140,10 @@ services:
   dbt-docs:
     image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
     env_file: .env
+    environment:
+      DBT_PROFILES_DIR: /usr/app/dbt
     volumes:
-      - ../dbt:/usr/app/dbt
+      - ${HOST_PROJECT_ROOT}/dbt:/usr/app/dbt
     working_dir: /usr/app/dbt
     ports:
       - "8081:8080"
