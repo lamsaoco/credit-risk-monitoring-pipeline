@@ -1,24 +1,85 @@
-
 version: 2
 
 models:
   - name: fct_loan_risk
-    description: "Final fact table for analytics. Contains loan details, borrower metrics, and calculated risk segments."
+    description: "Final fact table for analytics. Contains loan details, borrower metrics, and calculated risk segments based on HMDA and FRED datasets."
     columns:
+      # ── Identifiers & Metadata ──
       - name: id
-        description: "Primary key"
+        description: "Primary key for the loan record"
         tests:
           - unique
           - not_null
 
+      - name: lei
+        description: "A financial institution’s Legal Entity Identifier"
+
+      - name: state_code
+        description: "Two-letter state code"
+        
+      - name: state_name
+        description: "Full name of the state (derived from state_code seed mapping)"
+
+      - name: county_code
+        description: "State-county FIPS code"
+
+      - name: census_tract
+        description: "11 digit census tract number"
+
+      - name: data_year
+        description: "The calendar year the data submission covers"
+
+      # ── Loan Details (Enriched from Seeds) ──
+      - name: loan_type_name
+        description: "The type of covered loan or application (e.g., Conventional, FHA, VA)"
+
+      - name: loan_purpose_name
+        description: "The purpose of covered loan or application (e.g., Home purchase, Refinancing)"
+
+      - name: occupancy_type_name
+        description: "The occupancy type for the property securing the covered loan (e.g., Principal residence, Investment property)"
+
+      - name: lien_status_name
+        description: "Lien status of the property securing the covered loan (e.g., First lien, Subordinate lien)"
+
+      # ── Financial Parameters ──
+      - name: loan_amount
+        description: "The amount of the covered loan, or the amount applied for, in dollars"
+
+      - name: property_value
+        description: "The value of the property relied on in making the credit decision"
+
+      - name: income
+        description: "The gross annual income relied on in making the credit decision, in thousands of dollars"
+
+      - name: interest_rate
+        description: "The interest rate for the covered loan or application"
+
+      # ── Risk Metrics ──
+      - name: loan_to_value_ratio
+        description: "The ratio of the total amount of debt secured by the property to the value of the property relied on in making the credit decision"
+
+      - name: debt_to_income_numeric
+        description: "The ratio of the applicant's or borrower's total monthly debt to total monthly income"
+
+      - name: mkt_benchmark
+        description: "The 30-Year Fixed Rate Mortgage Average from FRED (MORTGAGE30US) for the corresponding month"
+
+      - name: interest_rate_spread
+        description: "The difference between the covered loan’s interest rate and the FRED market benchmark rate"
+
+      # ── Business Logic & Segmentation ──
       - name: risk_segment
-        description: "Calculated risk category: Low, Medium, High"
+        description: "Calculated risk category based on LTV (>80%) and DTI (>43%). Categorized as: Low, Medium, High"
         tests:
           - accepted_values:
               values: ['Low', 'Medium', 'High']
 
       - name: cost_category
-        description: "Comparison of interest rate vs market benchmarks"
+        description: "Comparison of the loan's interest rate vs the FRED market benchmark (Positive spread = High Cost)"
         tests:
           - accepted_values:
               values: ['High Cost', 'Market/Subsidized']
+
+      - name: mart_updated_at
+        description: "Timestamp when the mart record was built by dbt"

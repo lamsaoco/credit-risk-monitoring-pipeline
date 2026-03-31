@@ -15,3 +15,7 @@ airflow.db
 *airflow_variables.json
 *.env
 airflow/logs/*
+*dbt/target*
+*dbt/logs*
+dbt/.user.yml
+.vscode/settings.json

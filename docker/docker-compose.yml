@@ -31,8 +31,9 @@ services:
     user: "0:0"
     volumes:
       - ..:/project
+      - /var/run/docker.sock:/var/run/docker.sock
     command: >
-      bash -c "mkdir -p /project/airflow/dags /project/airflow/logs /project/airflow/plugins && chmod -R 777 /project/airflow/dags /project/airflow/logs /project/airflow/plugins"
+      bash -c "chmod 666 /var/run/docker.sock && mkdir -p /project/airflow/dags /project/airflow/logs /project/airflow/plugins && chmod -R 777 /project/airflow/dags /project/airflow/logs /project/airflow/plugins"
 
   postgres:
     image: postgres:15
@@ -70,6 +71,8 @@ services:
       POSTGRES_USER: ${DW_POSTGRES_USER}
       POSTGRES_PASSWORD: ${DW_POSTGRES_PASSWORD}
       POSTGRES_DB: ${DW_POSTGRES_DB:-credit_risk_dw}
+    ports:
+      - "5433:5432"
     volumes:
       - dw_postgres_data:/var/lib/postgresql/data
       # DDL: auto-creates credit_risk schema & stg_loans table on first start
@@ -120,13 +123,53 @@ services:
   dbt:
     image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
     env_file: .env
+    environment:
+      # Tell dbt where to find profiles.yml (same folder as the project)
+      DBT_PROFILES_DIR: /usr/app/dbt
     volumes:
-      - ../dbt:/usr/app/dbt
+      # Use HOST_PROJECT_ROOT so Docker daemon on the host can resolve the path correctly (DooD pattern)
+      - ${HOST_PROJECT_ROOT}/dbt:/usr/app/dbt
     working_dir: /usr/app/dbt
     entrypoint: [ "dbt" ]
+    command: [ "debug" ] # Default command to avoid just printing help
     depends_on:
       postgres-dw:
         condition: service_healthy
+
+  # ── dbt Documentation UI ──
+  dbt-docs:
+    image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
+    env_file: .env
+    environment:
+      DBT_PROFILES_DIR: /usr/app/dbt
+    volumes:
+      - ${HOST_PROJECT_ROOT}/dbt:/usr/app/dbt
+    working_dir: /usr/app/dbt
+    ports:
+      - "8081:8080"
+    restart: unless-stopped
+    entrypoint:
+      - sh
+      - -c
+      - "dbt docs generate && dbt docs serve --host 0.0.0.0 --port 8080"
+    depends_on:
+      - dbt
+
+  # ── Streamlit Analytics Dashboard ──
+  dashboard:
+    build:
+      context: ../dashboard
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      DW_POSTGRES_HOST: postgres-dw
+      DW_POSTGRES_PORT: 5432
+    ports:
+      - "8501:8501"
+    depends_on:
+      postgres-dw:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   postgres_data:
