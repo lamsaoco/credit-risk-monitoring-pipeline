@@ -1,6 +1,5 @@
-
 WITH base_data AS (
-    SELECT * FROM {{ source('credit_risk_prod', 'fct_loan_risk') }}
+    SELECT * FROM {{ ref('fct_loan_risk') }}
 )
 
 SELECT 
@@ -9,12 +8,13 @@ SELECT
     state_name,
     risk_segment,
     loan_purpose_name,
-    -- Các chỉ số cơ bản
-    COUNT(*) as total_loans,
+    -- Đổi tên thành loan_count để khớp với app.py
+    COUNT(*) as loan_count, 
     SUM(loan_amount) as total_loan_amount,
-    AVG(interest_rate) as avg_interest_rate,
+    -- Thêm SUM(interest_rate) để App tính lại Weighted Average khi Filter
+    SUM(interest_rate) as sum_interest_rate, 
     AVG(interest_rate_spread) as avg_rate_spread,
-    -- Chỉ số rủi ro nâng cao (Bad Loan Ratio cho Heatmap)
+    -- Cột này dùng cho Heatmap
     COUNT(*) FILTER (WHERE risk_segment = 'High')::FLOAT / COUNT(*) as high_risk_ratio
 FROM base_data
 GROUP BY 1, 2, 3, 4, 5

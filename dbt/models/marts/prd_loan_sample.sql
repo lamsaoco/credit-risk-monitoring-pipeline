@@ -7,6 +7,6 @@ SELECT
     risk_segment,
     loan_amount,
     loan_purpose_name
-FROM {{ source('credit_risk_prod', 'fct_loan_risk') }}
+FROM {{ ref('fct_loan_risk') }}
 ORDER BY RANDOM()
 LIMIT 10000
