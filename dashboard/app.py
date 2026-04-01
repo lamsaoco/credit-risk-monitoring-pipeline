@@ -21,12 +21,12 @@ st.markdown("""
         border-radius: 12px;
         border: 1px solid #30363d;
     }
-    /* Chỉnh màu tiêu đề (Label) của Dashboard Metrics */
+    /* Adjust Label color for Dashboard Metrics */
     [data-testid="stMetricLabel"] *, [data-testid="stMetricLabel"] {
         color: #8b949e !important;
         font-weight: 600 !important;
     }
-    /* Chỉnh màu các con số (Value) nổi bật màu trắng */
+    /* Set Value text to prominent white */
     [data-testid="stMetricValue"] {
         color: #ffffff !important;
     }
@@ -52,7 +52,7 @@ engine = get_engine()
 
 @st.cache_data(ttl=86400)
 def load_filters():
-    """ Query nhỏ gọn lấy cấu hình tự động (Năm và Danh sách Bang) """
+    """ Lightweight query to auto-fetch configuration (Year and State lists) """
     with engine.connect() as conn:
         years = pd.read_sql("SELECT DISTINCT data_year FROM credit_risk_prod.prd_risk_summary ORDER BY data_year DESC", conn)['data_year'].tolist()
         states = pd.read_sql("SELECT DISTINCT state_name FROM credit_risk_prod.prd_risk_summary WHERE state_name IS NOT NULL ORDER BY state_name", conn)['state_name'].tolist()
@@ -60,11 +60,11 @@ def load_filters():
 
 @st.cache_data(ttl=600)
 def load_main_data(year, state_names):
-    """ Đẩy logic filter thẳng vào SQL WHERE clause để chặn quét toàn bảng. """
+    """ Push filter logic directly into SQL WHERE clause to avoid full table scans. """
     if not state_names:
         return pd.DataFrame(), pd.DataFrame()
     with engine.connect() as conn:
-        # Xử lý formatting SQL IN clause parameter array
+        # Format the SQL IN clause parameter array
         state_tuple = tuple(state_names) if len(state_names) > 1 else f"('{state_names[0]}')"
         
         query_summ = text(f"SELECT * FROM credit_risk_prod.prd_risk_summary WHERE data_year = :year AND state_name IN {state_tuple}")
@@ -76,7 +76,7 @@ def load_main_data(year, state_names):
 
 @st.cache_data(ttl=600)
 def load_heatmap_data(year):
-    """ Chỉ lọc theo năm nhưng lấy full states để Heatmap quét toàn bộ nước Mỹ. """
+    """ Filter by year but retrieve full states to map the entire US. """
     with engine.connect() as conn:
         query_map = text("""
             SELECT state_code, SUM(loan_count) as loan_count 
@@ -88,7 +88,7 @@ def load_heatmap_data(year):
     return df_map
 
 try:
-    # 1. Tải danh sách filter trước
+    # 1. Pre-load filter choices
     nav_years, nav_states = load_filters()
     
     # 2. Sidebar Filters
@@ -100,9 +100,9 @@ try:
         st.warning("Please select at least one state.")
         st.stop()
 
-    # 3. Tải Data với Predicate Pushdown tùy thuộc lựa chọn người dùng
+    # 3. Load Data with Predicate Pushdown based on user selection
     df_summary, df_sample = load_main_data(selected_year, selected_states)
-    df_map = load_heatmap_data(selected_year)  # Heatmap lấy Full States cho Year được chọn
+    df_map = load_heatmap_data(selected_year)  # Heatmap retrieves Full States for selected Year
 
     # --- Dashboard Header ---
     st.title("🚀 HMDA Credit Risk Dashboard")
@@ -133,13 +133,13 @@ try:
                                 color='risk_segment', color_discrete_map={'High': '#ff4b4b', 'Medium': '#ffa421', 'Low': '#00d4ff'})
             st.plotly_chart(fig_sun, use_container_width=True)
         else:
-            st.info("Không có dữ liệu")
+            st.info("No data available")
     with c2:
         st.subheader("📍 Geography Heatmap")
-        # Sử dụng dữ liệu riêng full states cho heatmap
+        # Use specific full states data for the heatmap
         if not df_map.empty:
             fig_map = px.choropleth(df_map, locations='state_code', locationmode="USA-states", color='loan_count', scope="usa", color_continuous_scale="Blues")
-            # Hiển thị text mã Bang đè lên biểu đồ khu vực dùng add_scattergeo
+            # Display State code text over choropleth using add_scattergeo
             fig_map.add_scattergeo(
                 locations=df_map['state_code'],
                 locationmode="USA-states",
@@ -148,11 +148,11 @@ try:
                 textfont=dict(color="black", size=10, weight="bold"),
                 hoverinfo="skip"
             )
-            # Tối ưu hóa padding của bản đồ cho to ra
+            # Optimize map padding to enlarge it
             fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
             st.plotly_chart(fig_map, use_container_width=True)
         else:
-            st.info("Không có dữ liệu cho năm này")
+            st.info("No data available for this year")
 
     # --- Visualization Row 2 ---
     c3, c4 = st.columns([1.2, 0.8])
@@ -162,7 +162,7 @@ try:
             fig_scatter = px.scatter(df_sample, x='income', y='interest_rate_spread', color='risk_segment', size='loan_amount')
             st.plotly_chart(fig_scatter, use_container_width=True)
         else:
-            st.info("Không có dữ liệu")
+            st.info("No data available")
     with c4:
         st.subheader("🏦 Purpose Breakdown")
         if not df_summary.empty:
@@ -170,7 +170,7 @@ try:
             fig_bar = px.bar(grouped, x='loan_purpose_name', y='loan_count', color='risk_segment', barmode='group')
             st.plotly_chart(fig_bar, use_container_width=True)
         else:
-            st.info("Không có dữ liệu")
+            st.info("No data available")
 
 except Exception as e:
     st.error(f"Pipeline Status: Pending. Error: {e}")
