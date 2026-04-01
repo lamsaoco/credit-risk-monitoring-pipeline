@@ -88,19 +88,51 @@ models:
     description: "Summary of loan risks grouped by year, state, risk segment, and loan purpose."
     columns:
       - name: data_year
+        description: "The calendar year the data submission covers"
         tests:
           - not_null
+      - name: state_code
+        description: "Two-letter state code"
+      - name: state_name
+        description: "Full name of the state (derived from state_code seed mapping)"
       - name: risk_segment
+        description: "Calculated risk category based on LTV (>80%) and DTI (>43%). Categorized as: Low, Medium, High"
         tests:
           - accepted_values:
               values: ['Low', 'Medium', 'High']
+      - name: loan_purpose_name
+        description: "The purpose of covered loan or application (e.g., Home purchase, Refinancing)"
+      - name: loan_count
+        description: "Total number of loans in this segment boundary"
+      - name: total_loan_amount
+        description: "Sum of loan_amount for all loans in this segment"
+      - name: sum_interest_rate
+        description: "Sum of interest_rate, used to calculate weighted average rate in the dashboard"
+      - name: avg_rate_spread
+        description: "Average interest rate spread over the market benchmark"
+      - name: high_risk_ratio
+        description: "Ratio of high-risk loans out of the total loans in this geographical segment"
 
   - name: prd_loan_sample
     description: "A random 10,000 row sample of valid loans for dashboard distribution plots."
     columns:
+      - name: data_year
+        description: "The calendar year the data submission covers"
+      - name: state_code
+        description: "Two-letter state code"
+      - name: state_name
+        description: "Full name of the state (derived from state_code seed mapping)"
       - name: income
+        description: "The gross annual income relied on in making the credit decision, in thousands of dollars"
         tests:
           - not_null
       - name: interest_rate_spread
+        description: "The difference between the covered loan’s interest rate and the FRED market benchmark rate"
         tests:
           - not_null
+      - name: risk_segment
+        description: "Calculated risk category based on LTV (>80%) and DTI (>43%). Categorized as: Low, Medium, High"
+      - name: loan_amount
+        description: "The amount of the covered loan, or the amount applied for, in dollars"
+      - name: loan_purpose_name
+        description: "The purpose of covered loan or application (e.g., Home purchase, Refinancing)"
