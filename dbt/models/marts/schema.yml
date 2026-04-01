@@ -83,3 +83,24 @@ models:
 
       - name: mart_updated_at
         description: "Timestamp when the mart record was built by dbt"
+
+  - name: prd_risk_summary
+    description: "Summary of loan risks grouped by year, state, risk segment, and loan purpose."
+    columns:
+      - name: data_year
+        tests:
+          - not_null
+      - name: risk_segment
+        tests:
+          - accepted_values:
+              values: ['Low', 'Medium', 'High']
+
+  - name: prd_loan_sample
+    description: "A random 10,000 row sample of valid loans for dashboard distribution plots."
+    columns:
+      - name: income
+        tests:
+          - not_null
+      - name: interest_rate_spread
+        tests:
+          - not_null

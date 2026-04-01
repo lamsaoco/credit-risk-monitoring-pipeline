@@ -11,24 +11,60 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS for Professional Dark Theme
+# Restore original clean colors
+risk_colors = {'High': '#ff4b4b', 'Medium': '#ffa421', 'Low': '#00d4ff'}
+
+# Removed px.defaults.template to seamlessly adapt to Light Mode
+
+# Modern Light Mode CSS
 st.markdown("""
     <style>
-    .main { background-color: #0e1117; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+    h1, h2, h3, h4, .st-emotion-cache-10trblm {
+        font-family: 'Outfit', sans-serif !important;
+        color: #1f2937 !important;
+    }
+    
+    /* Elegant soft blue-gray background */
+    [data-testid="stAppViewContainer"] {
+        background-color: #f0f4f8;
+    }
+    /* Solid white sidebar for contrast */
+    [data-testid="stSidebar"] {
+        background-color: #ffffff;
+        border-right: 1px solid #e5e7eb;
+    }
+    
+    /* White Card metrics with soft shadows */
     [data-testid="stMetric"] {
-        background-color: #161b22;
+        background-color: #ffffff;
         padding: 20px;
         border-radius: 12px;
-        border: 1px solid #30363d;
+        border: 1px solid #e5e7eb;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); /* Slight elevation */
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
-    /* Adjust Label color for Dashboard Metrics */
+    /* Bounce animation on hover */
+    [data-testid="stMetric"]:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+    
+    /* Subdued label color */
     [data-testid="stMetricLabel"] *, [data-testid="stMetricLabel"] {
-        color: #8b949e !important;
-        font-weight: 600 !important;
+        color: #6b7280 !important;
+        font-weight: 500 !important;
+        font-family: 'Inter', sans-serif;
     }
-    /* Set Value text to prominent white */
+    /* Bold dark-gray metrics */
     [data-testid="stMetricValue"] {
-        color: #ffffff !important;
+        color: #111827 !important;
+        font-family: 'Outfit', sans-serif;
+        font-weight: 700 !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -130,7 +166,8 @@ try:
         st.subheader("📊 Risk Hierarchy")
         if not df_summary.empty:
             fig_sun = px.sunburst(df_summary, path=['risk_segment', 'loan_purpose_name'], values='loan_count',
-                                color='risk_segment', color_discrete_map={'High': '#ff4b4b', 'Medium': '#ffa421', 'Low': '#00d4ff'})
+                                color='risk_segment', color_discrete_map=risk_colors)
+            # Restore default interactive background in Light Theme
             st.plotly_chart(fig_sun, use_container_width=True)
         else:
             st.info("No data available")
@@ -138,8 +175,9 @@ try:
         st.subheader("📍 Geography Heatmap")
         # Use specific full states data for the heatmap
         if not df_map.empty:
+            # Revert to original Blues gradient
             fig_map = px.choropleth(df_map, locations='state_code', locationmode="USA-states", color='loan_count', scope="usa", color_continuous_scale="Blues")
-            # Display State code text over choropleth using add_scattergeo
+            # Black bold text for better contrast on Blues
             fig_map.add_scattergeo(
                 locations=df_map['state_code'],
                 locationmode="USA-states",
@@ -159,7 +197,10 @@ try:
     with c3:
         st.subheader("💰 Income vs Rate Spread (Sampled)")
         if not df_sample.empty:
-            fig_scatter = px.scatter(df_sample, x='income', y='interest_rate_spread', color='risk_segment', size='loan_amount')
+            fig_scatter = px.scatter(df_sample, x='income', y='interest_rate_spread', color='risk_segment', size='loan_amount', color_discrete_map=risk_colors, opacity=0.5)
+            # Hide grids to emphasize data points
+            fig_scatter.update_xaxes(showgrid=False)
+            fig_scatter.update_yaxes(showgrid=False)
             st.plotly_chart(fig_scatter, use_container_width=True)
         else:
             st.info("No data available")
@@ -167,7 +208,7 @@ try:
         st.subheader("🏦 Purpose Breakdown")
         if not df_summary.empty:
             grouped = df_summary.groupby(['loan_purpose_name', 'risk_segment'])['loan_count'].sum().reset_index()
-            fig_bar = px.bar(grouped, x='loan_purpose_name', y='loan_count', color='risk_segment', barmode='group')
+            fig_bar = px.bar(grouped, x='loan_purpose_name', y='loan_count', color='risk_segment', barmode='group', color_discrete_map=risk_colors)
             st.plotly_chart(fig_bar, use_container_width=True)
         else:
             st.info("No data available")

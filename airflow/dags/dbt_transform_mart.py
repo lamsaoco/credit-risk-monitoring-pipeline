@@ -52,8 +52,8 @@ with DAG(
         "data_year": Param(
             2024, 
             type="integer", 
-            title="Năm xử lý (Data Year)",
-            description="Lọc dữ liệu theo năm để dbt xử lý riêng lẻ (khi chạy bấm tay)"
+            title="Data Year",
+            description="Filter data by year for separate dbt processing (when run manually)"
         ),
     },
 ) as dag:
