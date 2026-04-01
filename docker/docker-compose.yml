@@ -160,6 +160,8 @@ services:
     build:
       context: ../dashboard
       dockerfile: Dockerfile
+    volumes:
+      - ../dashboard:/app
     env_file: .env
     environment:
       DW_POSTGRES_HOST: postgres-dw
@@ -170,6 +172,10 @@ services:
       postgres-dw:
         condition: service_healthy
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
 volumes:
   postgres_data:

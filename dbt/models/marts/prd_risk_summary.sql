@@ -1,3 +1,5 @@
+{{ config(materialized='table') }}
+
 WITH base_data AS (
     -- Import the core fact table from the staging/intermediate layer
     SELECT * FROM {{ ref('fct_loan_risk') }}

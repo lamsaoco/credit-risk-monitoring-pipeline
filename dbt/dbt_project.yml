@@ -28,7 +28,7 @@ models:
       +materialized: view
     marts:
       +schema: prod
-      +materialized: table
+      +materialized: view
 
 seeds:
   credit_risk_dw:

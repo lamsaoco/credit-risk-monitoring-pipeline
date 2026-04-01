@@ -1,3 +1,5 @@
+{{ config(materialized='table') }}
+
 SELECT 
     data_year,
     state_code,
