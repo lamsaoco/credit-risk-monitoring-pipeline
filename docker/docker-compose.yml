@@ -11,6 +11,12 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+    # ── Auto-register Snowflake connection from env vars (no UI setup needed) ──
+    # URI format: snowflake://user:pass@/DATABASE/SCHEMA?account=...&warehouse=...&role=...
+    # Docker Compose interpolates ${...} from docker/.env at runtime.
+    # WARNING: If SNOWFLAKE_PASSWORD contains special chars (@, /, ?, #),
+    #          URL-encode them first (e.g. @ → %40) to avoid URI parse errors.
+    AIRFLOW_CONN_SNOWFLAKE_DEFAULT: "snowflake://${SNOWFLAKE_USER}:${SNOWFLAKE_PASSWORD}@/${SNOWFLAKE_DATABASE}/${SNOWFLAKE_SCHEMA}?account=${SNOWFLAKE_ACCOUNT}&warehouse=${SNOWFLAKE_WAREHOUSE}&role=${SNOWFLAKE_ROLE}"
   volumes:
     - ../airflow/dags:/opt/airflow/dags
     - ../airflow/logs:/opt/airflow/logs
@@ -120,8 +126,12 @@ services:
       retries: 5
 
   # ── Standalone dbt ──
+  # Image is driven by DBT_ADAPTER env var in .env:
+  #   DBT_ADAPTER=postgres   → ghcr.io/dbt-labs/dbt-postgres:1.9.0  (default)
+  #   DBT_ADAPTER=snowflake  → ghcr.io/dbt-labs/dbt-snowflake:1.9.0
+  # Switch backend: change both DW_BACKEND and DBT_ADAPTER in docker/.env
   dbt:
-    image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
+    image: ghcr.io/dbt-labs/dbt-${DBT_ADAPTER:-postgres}:1.9.0
     env_file: .env
     environment:
       # Tell dbt where to find profiles.yml (same folder as the project)
@@ -131,14 +141,18 @@ services:
       - ${HOST_PROJECT_ROOT}/dbt:/usr/app/dbt
     working_dir: /usr/app/dbt
     entrypoint: [ "dbt" ]
-    command: [ "debug" ] # Default command to avoid just printing help
+    command: [ "debug" ]  # Default command to avoid just printing help
     depends_on:
       postgres-dw:
         condition: service_healthy
 
   # ── dbt Documentation UI ──
+  # Uses same DBT_ADAPTER image as the 'dbt' service above.
+  # DBT_TARGET determines which database to connect to when generating docs:
+  #   DBT_TARGET=dev       → PostgreSQL (default)
+  #   DBT_TARGET=snowflake → Snowflake
   dbt-docs:
-    image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
+    image: ghcr.io/dbt-labs/dbt-${DBT_ADAPTER:-postgres}:1.9.0
     env_file: .env
     environment:
       DBT_PROFILES_DIR: /usr/app/dbt
@@ -151,7 +165,7 @@ services:
     entrypoint:
       - sh
       - -c
-      - "dbt docs generate && dbt docs serve --host 0.0.0.0 --port 8080"
+      - "dbt docs generate --target ${DBT_TARGET:-dev} && dbt docs serve --host 0.0.0.0 --port 8080"
     depends_on:
       - dbt
 

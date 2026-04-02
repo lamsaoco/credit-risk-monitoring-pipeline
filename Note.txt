@@ -59,3 +59,19 @@ docker compose exec airflow-scheduler java -version
 2. Go to **Admin → Variables** → add `s3_bucket_name`, `email_receiver`, `fred_api_key`
 3. Trigger DAG `credit_risk_master_ingestion` with config `{"year": 2024}`
 4. Check log for task `ingest_hmda_spark` — must show "Uploading partitioned Parquet files"
+
+Import terraform
+# General syntax: terraform import aws_s3_bucket.data_lake <bucket-name>
+terraform import aws_s3_bucket.data_lake my-mortgage-data-lake
+
+# General syntax: terraform import aws_s3_bucket_public_access_block.block_public <bucket-name>
+terraform import aws_s3_bucket_public_access_block.block_public my-mortgage-data-lake
+
+# Import for 'raw' folder
+terraform import 'aws_s3_object.folders["raw"]' credit-risk-monitoring-bucket/raw/
+
+# Import for 'staging' folder
+terraform import 'aws_s3_object.folders["staging"]' credit-risk-monitoring-bucket/staging/
+
+# Import for 'prod' folder
+terraform import 'aws_s3_object.folders["prod"]' credit-risk-monitoring-bucket/prod/

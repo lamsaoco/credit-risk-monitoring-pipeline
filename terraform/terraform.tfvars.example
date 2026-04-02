@@ -1,17 +1,23 @@
-variable "aws_region" {
-  description = "Region"
-  type        = string
-  default     = "your-region-here"
-}
+# Copy to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored — never commit real credentials.
 
-variable "bucket_name" {
-  description = "S3 Bucket Name"
-  type        = string
-  default     = "your-bucket-name-here"
-}
+# ── AWS ──────────────────────────────────────────────────────────────────── #
+aws_region   = "ap-southeast-1"
+bucket_name  = "your-bucket-name"
+project_name = "phannh-de-project"
 
-variable "project_name" {
-  description = "Project Name"
-  type        = string
-  default     = "your-project-name-here"
-}
+# ── Snowflake ─────────────────────────────────────────────────────────────── #
+# Set enable_snowflake = true to provision Snowflake infrastructure.
+# Leave false for PostgreSQL-only mode (Snowflake vars are ignored).
+#
+# Provisioning flow (run ONCE, then never again — Snowflake is cloud-persistent):
+#   1. Fill in the Snowflake credentials below
+#   2. terraform init   (downloads Snowflake-Labs/snowflake provider)
+#   3. terraform apply  (creates DB / STG+PROD schemas / COMPUTE_WH / STG_LOANS table)
+#   4. Switch pipeline: set DW_BACKEND=snowflake + DBT_ADAPTER=snowflake in docker/.env
+enable_snowflake = false   # set to true when ready to provision
+
+snowflake_account  = "your_account.ap-southeast-1"
+snowflake_user     = "your_snowflake_user"
+snowflake_password = "your_snowflake_password"
+snowflake_role     = "SYSADMIN"

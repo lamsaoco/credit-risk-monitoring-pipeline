@@ -3,8 +3,12 @@ version: 2
 
 sources:
   - name: credit_risk_source
-    database: "{{ env_var('DW_POSTGRES_DB', 'credit_risk_dw') }}"
-    schema: credit_risk
+    # Resolve database and schema from the active dbt target automatically:
+    #   --target dev        → database=credit_risk_dw,  schema=credit_risk
+    #   --target snowflake  → database=CREDIT_RISK_DW,  schema=STG
+    # No env var or code change needed when switching backends.
+    database: "{{ target.database }}"
+    schema: "{{ target.schema }}"
     tables:
       - name: stg_loans
         description: "Raw staging table for HMDA loan data enriched with FRED interest rates."

@@ -1,7 +1,10 @@
 
 credit_risk_profile:
+  # Default target: 'dev' (PostgreSQL). Switch to 'snowflake' via --target flag in Airflow DAG.
   target: dev
   outputs:
+
+    # ── PostgreSQL (local Docker container) ───────────────────────────────────
     dev:
       type: postgres
       host: postgres-dw
@@ -9,5 +12,20 @@ credit_risk_profile:
       password: "{{ env_var('DW_POSTGRES_PASSWORD') }}"
       port: 5432
       dbname: "{{ env_var('DW_POSTGRES_DB', 'credit_risk_dw') }}"
-      schema: credit_risk
+      schema: credit_risk   # base schema → staging models land in credit_risk_stg
       threads: 4
+
+    # ── Snowflake (cloud) ─────────────────────────────────────────────────────
+    # Activate by passing --target snowflake to dbt CLI (set in Airflow DAG
+    # automatically when DW_BACKEND=snowflake in docker/.env).
+    snowflake:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'SYSADMIN') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'CREDIT_RISK_DW') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH') }}"
+      schema: STG            # base schema for sources; marts land in PROD via macro
+      threads: 4
+      client_session_keep_alive: false

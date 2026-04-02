@@ -19,3 +19,5 @@ airflow/logs/*
 *dbt/logs*
 dbt/.user.yml
 .vscode/settings.json
+terraform/terraform.tfvars
+terraform/.terraform/*

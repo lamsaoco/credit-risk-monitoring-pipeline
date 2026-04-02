@@ -18,6 +18,7 @@ SELECT
     SUM(interest_rate) as sum_interest_rate, 
     AVG(interest_rate_spread) as avg_rate_spread,
     -- Pre-calculating risk ratio for geographical heatmaps
-    COUNT(*) FILTER (WHERE risk_segment = 'High')::FLOAT / COUNT(*) as high_risk_ratio
+    -- Cross-database compatible: FILTER clause is PostgreSQL-only; CASE WHEN works on both PG and Snowflake
+    COUNT(CASE WHEN risk_segment = 'High' THEN 1 END) * 1.0 / NULLIF(COUNT(*), 0) as high_risk_ratio
 FROM base_data
 GROUP BY 1, 2, 3, 4, 5

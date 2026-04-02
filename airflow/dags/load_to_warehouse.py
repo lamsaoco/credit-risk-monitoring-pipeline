@@ -253,8 +253,9 @@ def _load_postgres(df, year: int):
 
 
 def _load_snowflake(df, year: int):
-    """Load DataFrame into Snowflake STAGING.STG_LOANS.
-    NOTE: This function is prepared but not tested until DW_BACKEND=snowflake.
+    """Load DataFrame into Snowflake STG.STG_LOANS.
+    Idempotent: deletes existing rows for the year before re-inserting,
+    matching the behaviour of the PostgreSQL loader for consistency.
     """
     from airflow.hooks.base import BaseHook
     import snowflake.connector
@@ -269,7 +270,7 @@ def _load_snowflake(df, year: int):
         user=conn_info.login,
         password=conn_info.password,
         database=extra.get("database", "CREDIT_RISK_DW"),
-        schema=extra.get("schema", "STAGING"),
+        schema=extra.get("schema", "STG"),   # STG matches warehouse/snowflake/schema.sql
         warehouse=extra.get("warehouse", "COMPUTE_WH"),
         role=extra.get("role", "SYSADMIN"),
     )
@@ -285,6 +286,13 @@ def _load_snowflake(df, year: int):
         if col in df_sf.columns:
             df_sf[col] = df_sf[col].fillna(0).astype(int)
 
+    # Idempotent: delete existing rows for this year before re-inserting
+    # Mirrors the PostgreSQL DELETE logic so re-runs are always safe.
+    with sf_conn.cursor() as cur:
+        cur.execute("DELETE FROM STG_LOANS WHERE DATA_YEAR = %s", (year,))
+        deleted = cur.rowcount
+        print(f"   Deleted {deleted} existing rows for year {year}.")
+
     total_rows = len(df_sf)
     chunk_size = 500000  # Larger chunks for Snowflake (efficient bulk load)
 
@@ -296,9 +304,10 @@ def _load_snowflake(df, year: int):
             conn=sf_conn,
             df=chunk,
             table_name="STG_LOANS",
-            auto_create_table=False
+            schema="STG",             # Explicit schema — avoids relying solely on connection default
+            auto_create_table=False,
         )
-        
+
         if not success:
             raise RuntimeError(f"Snowflake load failed at row {i}")
 
