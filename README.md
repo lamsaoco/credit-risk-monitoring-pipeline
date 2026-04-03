@@ -83,8 +83,11 @@ flowchart TD
     PySpark["🔥 PySpark (Local)<br>Compute LTV, DTI & Spread"]
     S3_Staging[("☁️ AWS S3 (Staging)<br>enriched_parquet/")]
     
-    PG[("🐘 PostgreSQL<br>(Local - Postgres)")]
-    SF[("❄️ Snowflake<br>(Cloud - DW)")]
+    %% Target choice
+    TargetChoice{{"Backend Switch<br>(env: DW_BACKEND)"}}
+    
+    PG[("🐘 PostgreSQL<br>(Local - Option A)")]
+    SF[("❄️ Snowflake<br>(Cloud - Option B)")]
     
     DBT["🛠️ dbt Models<br>Staging Views → Prod Marts"]
     Streamlit["📈 Streamlit Dashboard<br>Risk Heatmaps & KPIs"]
@@ -100,7 +103,11 @@ flowchart TD
     %% Data Flow
     S3_Raw == "DAG 2" ==> PySpark
     PySpark == "DAG 2" ==> S3_Staging
-    S3_Staging == "DAG 3" ==> PG & SF
+    
+    S3_Staging == "DAG 3" ==> TargetChoice
+    TargetChoice -. "Option A" .-> PG
+    TargetChoice -. "Option B" .-> SF
+    
     PG == "DAG 4" ==> DBT
     SF == "DAG 4" ==> DBT
     DBT ==> Streamlit
@@ -113,6 +120,7 @@ flowchart TD
     classDef dbt fill:#FF694B,color:#fff,stroke:#cc543c,stroke-width:2px,rx:5px,ry:5px;
     classDef app fill:#FF4B4B,color:#fff,stroke:#cc3c3c,stroke-width:2px,rx:5px,ry:5px;
     classDef airflow fill:#017CEE,color:#fff,stroke:#015bb0,stroke-width:2px;
+    classDef choice fill:#f1c40f,color:#000,stroke:#d4ac0d,stroke-width:2px;
     
     class S3_Raw,S3_Staging s3;
     class PySpark spark;
@@ -121,6 +129,7 @@ flowchart TD
     class DBT dbt;
     class Streamlit app;
     class DAG1,DAG2,DAG3,DAG4 airflow;
+    class TargetChoice choice;
 ```
 ---
 
@@ -274,38 +283,46 @@ This is managed centrally via Airflow's `default_args` using the `AIRFLOW_VAR_EM
 
 ```mermaid
 flowchart TD
-    subgraph SF_DB ["❄️ Snowflake (Cloud)"]
-        SF_RAW[("RAW.STG_LOANS<br>(Physical, clustered)")]
-        SF_STG["STG.stg_loans<br>(View)"]
-        SF_RAW --> SF_STG
-    end
+    %% Decision point
+    Switch{{"Environment Variable<br>(DW_BACKEND)"}}
 
-    subgraph PG_DB ["🐘 PostgreSQL (Local)"]
+    subgraph PG_DB ["🐘 Option A: PostgreSQL (Local)"]
         PG_RAW[("credit_risk.stg_loans<br>(Physical, partitioned)")]
-        PG_STG["stg.stg_loans<br>(View)"]
+        PG_STG["stg.stg_loans<br>(dbt View)"]
         PG_RAW --> PG_STG
     end
 
-    subgraph Prod_DB ["📈 dbt PROD / prod schema"]
+    subgraph SF_DB ["❄️ Option B: Snowflake (Cloud)"]
+        SF_RAW[("RAW.STG_LOANS<br>(Physical, clustered)")]
+        SF_STG["STG.stg_loans<br>(dbt View)"]
+        SF_RAW --> SF_STG
+    end
+
+    Switch -. "If 'postgresql'" .-> PG_DB
+    Switch -. "If 'snowflake'" .-> SF_DB
+
+    subgraph Prod_DB ["📈 dbt PROD schema (Common Layer)"]
         direction LR
         FCT(["fct_loan_risk<br>(Fact: Risk Segments)"])
         SUM(["prd_risk_summary<br>(Agg: State-level)"])
-        SAMP(["prd_loan_sample<br>(Sample: Scatter Plot)"])
+        SAMP(["prd_loan_sample<br>(Sample: Scatter)"])
     end
 
-    SF_STG -.->|--target snowflake| FCT & SUM & SAMP
-    PG_STG -.->|--target dev| FCT & SUM & SAMP
+    PG_STG -.->|target: dev| FCT & SUM & SAMP
+    SF_STG -.->|target: snowflake| FCT & SUM & SAMP
 
     %% Styling
     classDef sf fill:#29B5E8,color:#fff,stroke:#1a90bc,stroke-width:2px;
     classDef pg fill:#336791,color:#fff,stroke:#234a69,stroke-width:2px;
     classDef stg fill:#FF694B,color:#fff,stroke:#cc543c,stroke-width:2px;
     classDef prod fill:#2EA043,color:#fff,stroke:#1f702f,stroke-width:2px,rx:10px,ry:10px;
+    classDef choice fill:#f1c40f,color:#000,stroke:#d4ac0d,stroke-width:2px;
 
     class SF_RAW sf;
     class PG_RAW pg;
     class SF_STG,PG_STG stg;
     class FCT,SUM,SAMP prod;
+    class Switch choice;
 ```
 
 ### Risk Segmentation Logic (in `fct_loan_risk.sql`)
