@@ -108,7 +108,45 @@ This project builds a **production-grade, fully automated data engineering pipel
 │  └──────────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
+graph LR
+    subgraph Infrastructure
+        TF[Terraform] --> AWS[AWS S3/EC2]
+    end
 
+    subgraph Orchestration
+        AF[Apache Airflow]
+    end
+
+    subgraph Data_Lake[Data Lake - S3]
+        R[Raw Layer]
+        S[Staging Layer]
+    end
+
+    subgraph Processing[Compute]
+        SP[PySpark / Spark]
+    end
+
+    subgraph Warehouse[Storage & Modeling]
+        PG[(Postgres)]
+        SF[(Snowflake)]
+        DBT[[dbt - Transform]]
+    end
+
+    subgraph BI[Visualization]
+        ST[Streamlit App]
+    end
+
+    %% Flow
+    R --> SP
+    SP -- Enrichment --> S
+    S -- Chunk Load --> PG & SF
+    PG & SF --- DBT
+    DBT -- Prod Marts --> ST
+
+    %% Airflow control
+    AF -.-> SP
+    AF -.-> PG
+    AF -.-> DBT
 ---
 
 ## 🛠️ Tech Stack
