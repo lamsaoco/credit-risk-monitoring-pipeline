@@ -19,7 +19,7 @@ Task Flow:
 """
 
 from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator, ShortCircuitOperator
 from airflow.models import Variable
 from airflow.models.param import Param
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
@@ -74,6 +74,8 @@ default_args = {
 def validate_staging_landing(**kwargs):
     """
     Guard check: ensure enriched Parquet for the target year exists on S3.
+    Returns False (triggering ShortCircuit halt) if staging data is missing.
+    Returns True to allow downstream tasks to proceed.
     """
     from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
@@ -83,11 +85,12 @@ def validate_staging_landing(**kwargs):
 
     hook = S3Hook(aws_conn_id="aws_default")
     if not hook.list_keys(bucket, prefix=prefix, max_items=1):
-        raise FileNotFoundError(
-            f"Staging data for year {year} not found at s3://{bucket}/{prefix}. "
-            f"Run the 'mortgage_risk_silver_enrichment' DAG first."
-        )
-    print(f"✅ Staging landing validated for year {year}.")
+        print(f"❌ Validation FAILED: Staging data for year {year} NOT found at s3://{bucket}/{prefix}.")
+        print("Halting DAG — no downstream tasks will run.")
+        return False
+
+    print(f"✅ Staging landing validated for year {year}. Proceeding...")
+    return True
 
 
 # ─────────────── #
@@ -123,41 +126,61 @@ def download_staging_to_local(**kwargs):
     print(f"✅ Downloaded {downloaded} Parquet files to {workspace}")
 
 
+# Columns shared by both backends
+_TARGET_COLUMNS = [
+    "activity_year", "lei", "state_code", "county_code", "census_tract",
+    "loan_type", "loan_purpose", "loan_amount", "interest_rate",
+    "property_value", "occupancy_type", "lien_status",
+    "income", "applicant_age",
+    "loan_to_value_ratio", "debt_to_income_numeric",
+    "mkt_benchmark", "interest_rate_spread",
+    "data_year",
+]
+
+# Batch size for PostgreSQL — moderate size to keep RAM stable (~300MB/batch)
+_PG_BATCH_SIZE = 500_000
+
+# Batch size for Snowflake — larger batches = fewer round trips = faster bulk load
+# 2M rows × ~20 columns × ~8 bytes ≈ 320MB per batch, safe on 8GB RAM
+_SF_BATCH_SIZE = 2_000_000
+
+
 # ─────────────────────────────────────── #
 #    TASK 3 — Dual Backend Load Logic     #
 # ─────────────────────────────────────── #
 def load_to_warehouse(**kwargs):
     """
-    Reads staging Parquet and loads into the configured DW backend.
-    Controlled by the DW_BACKEND environment variable.
+    Streams staging Parquet into the configured DW backend using PyArrow
+    iter_batches(). RAM usage stays at ~1 chunk (~500k rows) at any time,
+    regardless of total dataset size. Fixes OOM on 8 GB RAM EC2 instances.
     """
-    import pandas as pd
+    import pyarrow.dataset as pad
 
     year = kwargs.get("params", {}).get("year") or kwargs.get("logical_date").year
     workspace = get_workspace(year)
     local_parquet_dir = os.path.join(workspace, f"{S3_STAGING_PREFIX}/{year}")
 
-    print(f"📦 Loading data for year {year} → Backend: {DW_BACKEND.upper()}")
+    if not os.path.exists(local_parquet_dir):
+        raise FileNotFoundError(f"Staging directory not found: {local_parquet_dir}")
 
-    # ── Read all Parquet partitions into one DataFrame ──
-    df = pd.read_parquet(local_parquet_dir)
-    df["data_year"] = year
-    record_count = len(df)
-    print(f"   Read {record_count:,} rows from local Parquet.")
+    print(f"📦 Streaming {local_parquet_dir} → {DW_BACKEND.upper()} (batch={_BATCH_SIZE:,} rows)")
+
+    # pyarrow.dataset supports real streaming to_batches() without loading all into RAM
+    dataset = pad.dataset(local_parquet_dir, format="parquet")
 
     if DW_BACKEND == "postgresql":
-        _load_postgres(df, year)
+        _stream_to_postgres(dataset, year)
     elif DW_BACKEND == "snowflake":
-        _load_snowflake(df, year)
+        _stream_to_snowflake(dataset, year)
     else:
         raise ValueError(f"Unknown DW_BACKEND: '{DW_BACKEND}'. Must be 'postgresql' or 'snowflake'.")
 
-    print(f"✅ Loaded {record_count:,} rows to {DW_BACKEND.upper()} for year {year}.")
 
-
-def _load_postgres(df, year: int):
-    """Load DataFrame into PostgreSQL credit_risk.stg_loans."""
-    import os
+# ──────────────────────────────── #
+#  PostgreSQL streaming loader     #
+# ──────────────────────────────── #
+def _stream_to_postgres(dataset, year: int):
+    """Stream PyArrow dataset into PostgreSQL one batch at a time."""
     import psycopg2
     from psycopg2.extras import execute_values
 
@@ -169,168 +192,164 @@ def _load_postgres(df, year: int):
         password=os.getenv("DW_POSTGRES_PASSWORD"),
     )
 
-    # Columns that exist in both parquet and the target table
-    target_columns = [
-        "activity_year", "lei", "state_code", "county_code", "census_tract",
-        "loan_type", "loan_purpose", "loan_amount", "interest_rate",
-        "property_value", "occupancy_type", "lien_status",
-        "income", "applicant_age",
-        "loan_to_value_ratio", "debt_to_income_numeric",
-        "mkt_benchmark", "interest_rate_spread",
-        "data_year",
-    ]
+    total_rows = 0
+    seen_states = set()
 
-    # Filter to only available columns (defensive)
-    available = [c for c in target_columns if c in df.columns]
-    df_insert = df[available].copy()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                # ── Step 1: Idempotent cleanup (runs ONCE before any batch) ──
+                cur.execute("DELETE FROM credit_risk.stg_loans WHERE data_year = %s", (year,))
+                print(f"   🗑️  Deleted {cur.rowcount:,} existing rows for year {year}.")
 
-    # Pre-processing: Ensure NaNs in integer columns are handled and types match Postgres
-    # (Pandas often defaults to float64 for columns with NaNs, which can cause issues)
-    int_cols = ["loan_type", "loan_purpose", "occupancy_type", "lien_status", "data_year", "activity_year"]
-    for col in int_cols:
-        if col in df_insert.columns:
-            df_insert[col] = df_insert[col].fillna(0).astype(int)
+                # ── Step 2: Create year-level and default partitions (ONCE) ──
+                cur.execute(f"""
+                    CREATE TABLE IF NOT EXISTS credit_risk.stg_loans_y{year}
+                    PARTITION OF credit_risk.stg_loans FOR VALUES IN ({year})
+                    PARTITION BY LIST (state_code);
+                """)
+                cur.execute(f"""
+                    CREATE TABLE IF NOT EXISTS credit_risk.stg_loans_y{year}_default
+                    PARTITION OF credit_risk.stg_loans_y{year} DEFAULT;
+                """)
 
-    if "income" in df_insert.columns:
-        df_insert["income"] = df_insert["income"].fillna(0).astype(float).astype(int)
+                # ── Step 3: Stream each batch ──
+                for batch in dataset.to_batches(batch_size=_PG_BATCH_SIZE):
+                    df_chunk = batch.to_pandas()
+                    df_chunk["data_year"] = year
 
-    with conn:
-        with conn.cursor() as cur:
-            # 1. Idempotent: delete existing rows for this year before re-inserting
-            # This empties any existing default partition, allowing new state partitions to be added safely.
-            cur.execute(
-                "DELETE FROM credit_risk.stg_loans WHERE data_year = %s", (year,)
-            )
-            deleted = cur.rowcount
-            print(f"   Deleted {deleted} existing rows for year {year}.")
+                    # Retain only target columns present in this chunk
+                    available = [c for c in _TARGET_COLUMNS if c in df_chunk.columns]
+                    df_chunk = df_chunk[available]
 
-            # 2. Dynamic Partitioning: Auto-create Year level partition
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS credit_risk.stg_loans_y{year}
-                PARTITION OF credit_risk.stg_loans FOR VALUES IN ({year})
-                PARTITION BY LIST (state_code);
-            """)
+                    # Type coercion
+                    int_cols = ["loan_type", "loan_purpose", "occupancy_type",
+                                "lien_status", "data_year", "activity_year"]
+                    for col in int_cols:
+                        if col in df_chunk.columns:
+                            df_chunk[col] = df_chunk[col].fillna(0).astype(int)
+                    if "income" in df_chunk.columns:
+                        df_chunk["income"] = df_chunk["income"].fillna(0).astype(float).astype(int)
 
-            # 3. Dynamic Partitioning: Auto-create State level sub-partitions
-            unique_states = df["state_code"].dropna().unique()
-            for state in unique_states:
-                safe_state = "".join(e for e in str(state) if e.isalnum())
-                if safe_state:
-                    # Escape single quotes in state names just in case
-                    val_state = str(state).replace("'", "''")
-                    cur.execute(f"""
-                        CREATE TABLE IF NOT EXISTS credit_risk.stg_loans_y{year}_{safe_state}
-                        PARTITION OF credit_risk.stg_loans_y{year} FOR VALUES IN ('{val_state}');
-                    """)
+                    # Create state sub-partitions for NEW states discovered in this batch
+                    batch_states = set(df_chunk["state_code"].dropna().unique())
+                    new_states = batch_states - seen_states
+                    for state in new_states:
+                        safe_state = "".join(e for e in str(state) if e.isalnum())
+                        val_state  = str(state).replace("'", "''")
+                        if safe_state:
+                            cur.execute(
+                                f"CREATE TABLE IF NOT EXISTS credit_risk.stg_loans_y{year}_{safe_state} "
+                                f"PARTITION OF credit_risk.stg_loans_y{year} FOR VALUES IN ('{val_state}');"
+                            )
+                    seen_states |= new_states
 
-            # 4. Dynamic Partitioning: Auto-create DEFAULT state partition
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS credit_risk.stg_loans_y{year}_default
-                PARTITION OF credit_risk.stg_loans_y{year} DEFAULT;
-            """)
+                    # Bulk insert
+                    cols = ", ".join(available)
+                    execute_values(
+                        cur,
+                        f"INSERT INTO credit_risk.stg_loans ({cols}) VALUES %s",
+                        df_chunk.itertuples(index=False, name=None),
+                        page_size=10_000,
+                    )
 
-            # 5. Execute Values with Progress Tracking
-            total_rows = len(df_insert)
-            chunk_size = 100000  # Print progress every 100k rows
-            cols = ", ".join(available)
-            insert_query = f"INSERT INTO credit_risk.stg_loans ({cols}) VALUES %s"
+                    total_rows += len(df_chunk)
+                    print(f"   ➡️  Inserted batch — running total: {total_rows:,} rows")
 
-            print(f"   🚀 Starting insert of {total_rows:,} rows...")
+                    # Explicitly free batch memory before next iteration
+                    del df_chunk
 
-            for i in range(0, total_rows, chunk_size):
-                chunk = df_insert.iloc[i : i + chunk_size]
-                execute_values(
-                    cur,
-                    insert_query,
-                    chunk.itertuples(index=False, name=None),
-                    page_size=10000,
-                )
-                
-                rows_done = min(i + chunk_size, total_rows)
-                percent = (rows_done / total_rows) * 100
-                print(f"   ➡️ Progress: {percent:6.1f}% | Processed {rows_done:9,} / {total_rows:,} rows")
+    finally:
+        conn.close()
 
-    conn.close()
+    print(f"✅ PostgreSQL load complete: {total_rows:,} rows for year {year}.")
 
 
-def _load_snowflake(df, year: int):
-    """Load DataFrame into Snowflake STG.STG_LOANS.
-    Idempotent: deletes existing rows for the year before re-inserting,
-    matching the behaviour of the PostgreSQL loader for consistency.
-    """
+# ──────────────────────────────── #
+#  Snowflake streaming loader      #
+# ──────────────────────────────── #
+def _stream_to_snowflake(dataset, year: int):
+    """Stream PyArrow dataset into Snowflake one batch at a time."""
     from airflow.hooks.base import BaseHook
     import snowflake.connector
     from snowflake.connector.pandas_tools import write_pandas
 
-    print(f"   ❄️ Connecting to Snowflake...")
     conn_info = BaseHook.get_connection("snowflake_default")
+    extra     = conn_info.extra_dejson
 
-    extra = conn_info.extra_dejson
     sf_conn = snowflake.connector.connect(
-        account=extra.get("account"),
-        user=conn_info.login,
-        password=conn_info.password,
-        database=extra.get("database", "CREDIT_RISK_DW"),
-        schema=extra.get("schema", "RAW"),   # RAW matches terraform schema raw
-        warehouse=extra.get("warehouse", "COMPUTE_WH"),
-        role=extra.get("role", "SYSADMIN"),
+        account   = extra.get("account"),
+        user      = conn_info.login,
+        password  = conn_info.password,
+        database  = extra.get("database", "CREDIT_RISK_DW"),
+        schema    = extra.get("schema",   "RAW"),
+        warehouse = extra.get("warehouse", "COMPUTE_WH"),
+        role      = extra.get("role",     "SYSADMIN"),
     )
 
-    # Columns that exist in the target table (match with Postgres logic)
-    target_columns = [
-        "activity_year", "lei", "state_code", "county_code", "census_tract",
-        "loan_type", "loan_purpose", "loan_amount", "interest_rate",
-        "property_value", "occupancy_type", "lien_status",
-        "income", "applicant_age",
-        "loan_to_value_ratio", "debt_to_income_numeric",
-        "mkt_benchmark", "interest_rate_spread",
-        "data_year",
-    ]
+    total_rows = 0
 
-    # Filter to only available columns (defensive)
-    available = [c for c in target_columns if c in df.columns]
-    df_sf = df[available].copy()
-    
-    # Uppercase columns for Snowflake compatibility
-    df_sf.columns = [c.upper() for c in df_sf.columns]
-    df_sf["DATA_YEAR"] = year
+    try:
+        # ── Step 1: Idempotent cleanup (runs ONCE before any batch) ──
+        with sf_conn.cursor() as cur:
+            cur.execute("DELETE FROM STG_LOANS WHERE DATA_YEAR = %s", (year,))
+            print(f"   🗑️  Deleted {cur.rowcount:,} existing rows for year {year}.")
 
-    # Ensure integer columns don't have NaNs causing float issues
-    int_cols = ["LOAN_TYPE", "LOAN_PURPOSE", "OCCUPANCY_TYPE", "LIEN_STATUS", "DATA_YEAR", "ACTIVITY_YEAR"]
-    for col in int_cols:
-        if col in df_sf.columns:
-            df_sf[col] = df_sf[col].fillna(0).astype(int)
+        # ── Step 2: Stream each batch, accumulating to SF_BATCH_SIZE before uploading ──
+        # PyArrow to_batches() returns small chunks limited by Parquet row groups.
+        # We accumulate them until reaching _SF_BATCH_SIZE for efficient Snowflake bulk load.
+        import pyarrow as pa
 
-    # Idempotent: delete existing rows for this year before re-inserting
-    # Mirrors the PostgreSQL DELETE logic so re-runs are always safe.
-    with sf_conn.cursor() as cur:
-        cur.execute("DELETE FROM STG_LOANS WHERE DATA_YEAR = %s", (year,))
-        deleted = cur.rowcount
-        print(f"   Deleted {deleted} existing rows for year {year}.")
+        pending_batches = []
+        pending_rows = 0
 
-    total_rows = len(df_sf)
-    chunk_size = 500000  # Larger chunks for Snowflake (efficient bulk load)
+        def _flush_to_snowflake(batches: list):
+            """Concatenate accumulated Arrow batches and upload as one DataFrame."""
+            combined = pa.concat_batches(batches).to_pandas()
+            combined["data_year"] = year
 
-    print(f"   🚀 Starting bulk upload to Snowflake ({total_rows:,} rows)...")
+            available = [c for c in _TARGET_COLUMNS if c in combined.columns]
+            combined = combined[available].copy()
+            combined.columns = [c.upper() for c in combined.columns]
+            combined["DATA_YEAR"] = year
 
-    for i in range(0, total_rows, chunk_size):
-        chunk = df_sf.iloc[i : i + chunk_size]
-        success, nchunks, nrows, _ = write_pandas(
-            conn=sf_conn,
-            df=chunk,
-            table_name="STG_LOANS",
-            schema="RAW",             # Explicit schema — avoids relying solely on connection default
-            auto_create_table=False,
-        )
+            int_cols = ["LOAN_TYPE", "LOAN_PURPOSE", "OCCUPANCY_TYPE",
+                        "LIEN_STATUS", "DATA_YEAR", "ACTIVITY_YEAR"]
+            for col in int_cols:
+                if col in combined.columns:
+                    combined[col] = combined[col].fillna(0).astype(int)
 
-        if not success:
-            raise RuntimeError(f"Snowflake load failed at row {i}")
+            success, _, nrows, _ = write_pandas(
+                conn=sf_conn, df=combined,
+                table_name="STG_LOANS", schema="RAW",
+                auto_create_table=False,
+            )
+            if not success:
+                raise RuntimeError("write_pandas reported failure for this batch.")
+            return len(combined), nrows
 
-        rows_done = min(i + chunk_size, total_rows)
-        percent = (rows_done / total_rows) * 100
-        print(f"   ➡️ Progress: {percent:6.1f}% | Uploaded {rows_done:9,} / {total_rows:,} rows")
+        for batch in dataset.to_batches(batch_size=_SF_BATCH_SIZE):
+            pending_batches.append(batch)
+            pending_rows += batch.num_rows
 
-    sf_conn.close()
+            if pending_rows >= _SF_BATCH_SIZE:
+                n_uploaded, nrows = _flush_to_snowflake(pending_batches)
+                total_rows += n_uploaded
+                print(f"   ➡️  Uploaded {nrows:,} rows — running total: {total_rows:,}")
+                pending_batches = []
+                pending_rows = 0
+                del n_uploaded
+
+        # Flush any remaining rows that didn't fill a full batch
+        if pending_batches:
+            n_uploaded, nrows = _flush_to_snowflake(pending_batches)
+            total_rows += n_uploaded
+            print(f"   ➡️  Uploaded final batch ({nrows:,} rows) — running total: {total_rows:,}")
+
+    finally:
+        sf_conn.close()
+
+    print(f"✅ Snowflake load complete: {total_rows:,} rows for year {year}.")
 
 
 # ─────────────── #
@@ -361,7 +380,7 @@ with DAG(
     },
 ) as dag:
 
-    t1 = PythonOperator(
+    t1 = ShortCircuitOperator(
         task_id="validate_staging_landing",
         python_callable=validate_staging_landing,
         provide_context=True,

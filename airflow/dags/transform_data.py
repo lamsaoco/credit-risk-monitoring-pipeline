@@ -1,5 +1,5 @@
 from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator, ShortCircuitOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.utils.email import send_email
 from airflow.models import Variable
@@ -47,19 +47,24 @@ default_args = {
 # --- TASK 1: LANDING ZONE VALIDATION ---
 def validate_raw_mortgage_landing(**kwargs):
     """
-    Business Check: Ensures HMDA Raw data for the target year has landed on S3.
+    Guard check: ensures HMDA Raw data for the target year has landed on S3.
+    Returns False (triggering ShortCircuit stop) if data is missing.
+    Returns True to allow downstream tasks to proceed.
     """
-    # Dynamic year logic as requested
     conf = kwargs.get('dag_run').conf or {}
     year = conf.get('year') or kwargs.get('logical_date').year
-    
+
     bucket = Variable.get("s3_bucket_name")
     prefix = f"raw/hmda_processed/{year}/"
-    
+
     hook = S3Hook(aws_conn_id='aws_default')
     if not hook.list_keys(bucket, prefix=prefix, max_items=1):
-        raise FileNotFoundError(f"Data Integrity Error: Raw HMDA folder for year {year} not found at {prefix}.")
-    print(f"✅ Landing Zone Validation Successful for year {year}.")
+        print(f"❌ Validation FAILED: Raw HMDA data for year {year} not found at s3://{bucket}/{prefix}.")
+        print("Halting DAG — no downstream tasks will run.")
+        return False
+
+    print(f"✅ Landing Zone Validation Successful for year {year}. Proceeding...")
+    return True
 
 # --- TASK 2: DOWNLOAD RAW TO LOCAL (Bypassing hadoop-aws bug) ---
 def download_raw_to_local_boto3(**kwargs):
@@ -208,7 +213,7 @@ with DAG(
     }
 ) as dag:
 
-    t1 = PythonOperator(
+    t1 = ShortCircuitOperator(
         task_id='validate_raw_mortgage_landing',
         python_callable=validate_raw_mortgage_landing,
         provide_context=True
