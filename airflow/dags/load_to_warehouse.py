@@ -163,6 +163,11 @@ def load_to_warehouse(**kwargs):
     if not os.path.exists(local_parquet_dir):
         raise FileNotFoundError(f"Staging directory not found: {local_parquet_dir}")
 
+    if DW_BACKEND == "postgresql":
+        _BATCH_SIZE = _PG_BATCH_SIZE
+    elif DW_BACKEND == "snowflake":
+       _BATCH_SIZE = _SF_BATCH_SIZE
+
     print(f"📦 Streaming {local_parquet_dir} → {DW_BACKEND.upper()} (batch={_BATCH_SIZE:,} rows)")
 
     # pyarrow.dataset with partitioning="hive" reconstructs partition columns (e.g. state_code)

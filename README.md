@@ -139,6 +139,7 @@ flowchart TD
 | **Containerization** | Docker Compose | Fully containerized local development environment |
 | **Compute** | AWS EC2 `m7i-flex.large` | 2 vCPU · 8 GB RAM · Production execution host |
 | **Language** | Python 3.12 | All pipeline logic and DAGs |
+| **Package Manager**| `uv` | Blazing-fast dependency resolution and virtual environments |
 
 ---
 
@@ -231,6 +232,22 @@ DAG 4: credit_risk_dbt_marts
 ```
 
 > **💡 Key Design:** DAGs 2, 3, and 4 have `schedule_interval=None`. They are exclusively triggered by their upstream DAG via `TriggerDagRunOperator`, preventing duplicate runs.
+
+---
+
+## ✨ Advanced Pipeline Features
+
+### ⚡ Fast Dependency Management with `uv`
+To maintain a deterministic and highly optimized environment, this project utilizes [**uv**](https://github.com/astral-sh/uv) — a blazing-fast Python package installer and resolver written in Rust. 
+Instead of relying on standard `pip` and `virtualenv`, `uv` is used to:
+- **Accelerate Docker Builds:** Significantly reduces image build times by resolving dependencies instantly.
+- **Strict Locking:** Ensures reproducible environments for Airflow, dbt, and PySpark across local and EC2 production instances without version conflicts.
+
+### 📧 Automated Email Alerting
+Monitoring 12M+ rows per run requires strict observability. **Email Notifications** are integrated directly into the workflow orchestration layer:
+- **On Failure (`email_on_failure`):** Immediately alerts data engineers if a task (like S3 download or PySpark OOM) crashes, providing the execution context and direct links to Airflow logs.
+- **On Success:** Sends a summary payload upon the successful finish of critical checkpoints or the final `dbt_build` milestone.
+This is managed centrally via Airflow's `default_args` using the `AIRFLOW_VAR_EMAIL_RECEIVER` environment variable setup in our SMTP configs.
 
 ---
 
