@@ -13,6 +13,7 @@
 [![Terraform](https://img.shields.io/badge/Terraform-IaC-7B42BC?logo=terraform)](https://terraform.io)
 [![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-FF4B4B?logo=streamlit)](https://streamlit.io)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](https://docker.com)
+[![EC2](https://img.shields.io/badge/AWS%20EC2-m7i--flex.large-FF9900?logo=amazonec2)](https://aws.amazon.com/ec2/instance-types/m7i/)
 
 </div>
 
@@ -120,9 +121,10 @@ This project builds a **production-grade, fully automated data engineering pipel
 | **Data Lake** | AWS S3 | Raw and staging data storage (Parquet format) |
 | **Data Warehouse** | PostgreSQL 15 / Snowflake | Dual-backend DW with single-switch toggle |
 | **Transformation** | dbt 1.9 | SQL-based modeling, data quality tests, seeds |
-| **IaC** | Terraform | Snowflake DB/Schema/Table/Warehouse provisioning |
+| **IaC** | Terraform | AWS S3 + Snowflake DB/Schema/Table/Warehouse provisioning |
 | **Dashboard** | Streamlit | Interactive risk monitoring UI |
 | **Containerization** | Docker Compose | Fully containerized local development environment |
+| **Compute** | AWS EC2 `m7i-flex.large` | 2 vCPU · 8 GB RAM · Production execution host |
 | **Language** | Python 3.12 | All pipeline logic and DAGs |
 
 ---
@@ -320,20 +322,48 @@ The Streamlit dashboard (port `8501`) provides:
 
 ## 🌐 Infrastructure as Code
 
-Snowflake infrastructure is fully managed by Terraform:
+Both **AWS S3** and **Snowflake** infrastructure are fully managed by Terraform:
 
 ```hcl
-# Resources provisioned by terraform apply:
+# AWS — S3 Data Lake (always provisioned)
+- aws_s3_bucket.data_lake                   # Private S3 bucket (force_destroy=true)
+- aws_s3_bucket_public_access_block         # Blocks all public access
+- aws_s3_object["raw", "staging", "prod"]   # Pre-creates the 3 Data Lake layer prefixes
+
+# Snowflake — Data Warehouse (only when enable_snowflake = true)
 - snowflake_database.credit_risk_dw
-- snowflake_schema.raw        # Landing zone for raw data
-- snowflake_schema.stg        # dbt staging views
-- snowflake_schema.prod       # dbt mart views
+- snowflake_schema.raw        # Landing zone for raw ingested data
+- snowflake_schema.stg        # dbt staging views output
+- snowflake_schema.prod       # dbt mart views output
 - snowflake_schema.lookup     # dbt seed tables
 - snowflake_warehouse.compute_wh   # X-SMALL, auto_suspend=120s
 - snowflake_table.stg_loans        # Clustered by (DATA_YEAR, STATE_CODE)
 ```
 
-Toggle Snowflake provisioning with `enable_snowflake = true/false` in `terraform.tfvars`.
+Toggle Snowflake provisioning with `enable_snowflake = true/false` in `terraform.tfvars`.  
+S3 is always provisioned regardless of the DW backend setting.
+
+---
+
+## 🖥️ Deployment Environment
+
+This entire project was developed and tested on an **AWS EC2 instance**:
+
+| Attribute | Value |
+|---|---|
+| **Instance Type** | `m7i-flex.large` |
+| **vCPUs** | 2 |
+| **RAM** | 8 GB |
+| **OS** | Ubuntu 22.04 LTS |
+| **Region** | `ap-southeast-1` (Singapore) |
+| **Storage** | EBS gp3 |
+
+All Docker containers (Airflow, dbt, PostgreSQL, Streamlit) run concurrently on this single instance. PySpark is tuned to operate within the 8 GB RAM constraint:
+- Spark driver: 4 GB
+- Shuffle partitions: 50 (reduced from default 200)
+- Processing 12M+ rows via local Spark mode without a cluster
+
+> **💡 Replication Tip:** Any machine with 8+ GB RAM and Docker installed can run this project. The EC2 `m7i-flex.large` is the minimum recommended spec for processing full yearly HMDA datasets.
 
 ---
 
