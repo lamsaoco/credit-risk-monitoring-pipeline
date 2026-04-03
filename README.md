@@ -76,37 +76,51 @@ This project builds a **production-grade, fully automated data engineering pipel
 
 ## 🏗️ Solution Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                        CREDIT RISK MONITORING PIPELINE                          │
-│                                                                                 │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────────────────┐  │
-│  │  DATA LAKE   │    │  PROCESSING  │    │         DATA WAREHOUSE           │  │
-│  │   (AWS S3)   │    │  (PySpark)   │    │                                  │  │
-│  │              │    │              │    │  ┌────────────┐  ┌────────────┐  │  │
-│  │  raw/        │───▶│  Enrich:     │───▶│  │ PostgreSQL │  │ Snowflake  │  │  │
-│  │  ├─hmda/     │    │  - LTV Ratio │    │  │  (local)   │  │  (cloud)   │  │  │
-│  │  └─fred_raw/ │    │  - DTI Score │    │  └────────────┘  └────────────┘  │  │
-│  │  staging/    │    │  - Mkt Rate  │    │         ▲               ▲         │  │
-│  │  └─enriched/ │    │  - Spread    │    │         │               │         │  │
-│  └──────────────┘    └──────────────┘    │  ┌──────┴───────────────┴──────┐  │  │
-│                                          │  │       dbt (Transform)        │  │  │
-│  ┌──────────────────────────────────┐    │  │  STG Views → PROD Marts     │  │  │
-│  │       ORCHESTRATION              │    │  └──────────────────────────────┘  │  │
-│  │       (Apache Airflow)           │    └──────────────────────────────────┘  │
-│  │                                  │                                           │
-│  │  DAG 1: Ingest ─────────────────▶ DAG 2: Transform ──────────────────────  │
-│  │                                       │                                      │
-│  │  DAG 3: Load to DW ◀─────────────────┘                                      │
-│  │          │                                                                   │
-│  │  DAG 4: dbt Build ◀───────────────────────────────────────────────────────  │
-│  └──────────────────────────────────┘                                           │
-│                                                                                 │
-│  ┌──────────────────────────────────────────────────────────────────────────┐  │
-│  │                    VISUALIZATION (Streamlit)                              │  │
-│  │         US Risk Heatmap · KPI Metrics · Loan Distribution Charts         │  │
-│  └──────────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    %% Nodes
+    S3_Raw[("☁️ AWS S3 (Raw)<br>hmda/ & fred_raw/")]
+    PySpark["🔥 PySpark (Local)<br>Compute LTV, DTI & Spread"]
+    S3_Staging[("☁️ AWS S3 (Staging)<br>enriched_parquet/")]
+    
+    PG[("🐘 PostgreSQL<br>(Local - Postgres)")]
+    SF[("❄️ Snowflake<br>(Cloud - DW)")]
+    
+    DBT["🛠️ dbt Models<br>Staging Views → Prod Marts"]
+    Streamlit["📈 Streamlit Dashboard<br>Risk Heatmaps & KPIs"]
+    
+    %% Orchestration
+    subgraph Airflow ["⏱️ Apache Airflow Orchestration (Automated Chaining)"]
+        direction LR
+        DAG1(["DAG 1:<br>Ingest"]) --> DAG2(["DAG 2:<br>Transform"])
+        DAG2 --> DAG3(["DAG 3:<br>Load DW"])
+        DAG3 --> DAG4(["DAG 4:<br>dbt Build"])
+    end
+
+    %% Data Flow
+    S3_Raw == "DAG 2" ==> PySpark
+    PySpark == "DAG 2" ==> S3_Staging
+    S3_Staging == "DAG 3" ==> PG & SF
+    PG == "DAG 4" ==> DBT
+    SF == "DAG 4" ==> DBT
+    DBT ==> Streamlit
+
+    %% Styling
+    classDef s3 fill:#FF9900,color:#fff,stroke:#e68a00,stroke-width:2px,rx:5px,ry:5px;
+    classDef spark fill:#E25A1C,color:#fff,stroke:#b34716,stroke-width:2px,rx:5px,ry:5px;
+    classDef dw fill:#29B5E8,color:#fff,stroke:#1a90bc,stroke-width:2px,rx:5px,ry:5px;
+    classDef pg fill:#336791,color:#fff,stroke:#234a69,stroke-width:2px,rx:5px,ry:5px;
+    classDef dbt fill:#FF694B,color:#fff,stroke:#cc543c,stroke-width:2px,rx:5px,ry:5px;
+    classDef app fill:#FF4B4B,color:#fff,stroke:#cc3c3c,stroke-width:2px,rx:5px,ry:5px;
+    classDef airflow fill:#017CEE,color:#fff,stroke:#015bb0,stroke-width:2px;
+    
+    class S3_Raw,S3_Staging s3;
+    class PySpark spark;
+    class SF dw;
+    class PG pg;
+    class DBT dbt;
+    class Streamlit app;
+    class DAG1,DAG2,DAG3,DAG4 airflow;
 ```
 ---
 
@@ -241,26 +255,40 @@ DAG 4: credit_risk_dbt_marts
 
 ### Schema Architecture
 
-```
-Snowflake:                        PostgreSQL:
-┌─────────────────────────┐       ┌───────────────────────────────┐
-│ RAW.STG_LOANS           │       │ credit_risk.stg_loans         │
-│ (Physical table, raw)   │       │ (Partitioned by data_year)    │
-└────────────┬────────────┘       └──────────────┬────────────────┘
-             │                                   │
-             ▼                                   ▼
-┌─────────────────────────┐       ┌───────────────────────────────┐
-│ STG.stg_loans (View)    │       │ stg.stg_loans (View)          │
-└────────────┬────────────┘       └──────────────┬────────────────┘
-             │                                   │
-             ▼                                   ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    PROD / prod schema                           │
-│  ┌─────────────────────┐   ┌────────────────┐   ┌───────────┐  │
-│  │ fct_loan_risk       │   │ prd_risk_      │   │ prd_loan_ │  │
-│  │ (Full fact table)   │   │ summary        │   │ sample    │  │
-│  └─────────────────────┘   └────────────────┘   └───────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph SF_DB ["❄️ Snowflake (Cloud)"]
+        SF_RAW[("RAW.STG_LOANS<br>(Physical, clustered)")]
+        SF_STG["STG.stg_loans<br>(View)"]
+        SF_RAW --> SF_STG
+    end
+
+    subgraph PG_DB ["🐘 PostgreSQL (Local)"]
+        PG_RAW[("credit_risk.stg_loans<br>(Physical, partitioned)")]
+        PG_STG["stg.stg_loans<br>(View)"]
+        PG_RAW --> PG_STG
+    end
+
+    subgraph Prod_DB ["📈 dbt PROD / prod schema"]
+        direction LR
+        FCT(["fct_loan_risk<br>(Fact: Risk Segments)"])
+        SUM(["prd_risk_summary<br>(Agg: State-level)"])
+        SAMP(["prd_loan_sample<br>(Sample: Scatter Plot)"])
+    end
+
+    SF_STG -.->|--target snowflake| FCT & SUM & SAMP
+    PG_STG -.->|--target dev| FCT & SUM & SAMP
+
+    %% Styling
+    classDef sf fill:#29B5E8,color:#fff,stroke:#1a90bc,stroke-width:2px;
+    classDef pg fill:#336791,color:#fff,stroke:#234a69,stroke-width:2px;
+    classDef stg fill:#FF694B,color:#fff,stroke:#cc543c,stroke-width:2px;
+    classDef prod fill:#2EA043,color:#fff,stroke:#1f702f,stroke-width:2px,rx:10px,ry:10px;
+
+    class SF_RAW sf;
+    class PG_RAW pg;
+    class SF_STG,PG_STG stg;
+    class FCT,SUM,SAMP prod;
 ```
 
 ### Risk Segmentation Logic (in `fct_loan_risk.sql`)
