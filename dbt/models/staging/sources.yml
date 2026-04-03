@@ -16,6 +16,11 @@ sources:
           - name: data_year
             tests:
               - not_null
+
           - name: state_code
+            description: >
+              2-char US state FIPS code (e.g. 'CA', 'TX').
+              All originated loans (action_taken=1) must have a valid state_code.
+              NULL here indicates a pipeline bug (e.g. Spark partitionBy stripping the column).
             tests:
               - not_null

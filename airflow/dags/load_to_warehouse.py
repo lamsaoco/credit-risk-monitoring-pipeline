@@ -165,8 +165,9 @@ def load_to_warehouse(**kwargs):
 
     print(f"📦 Streaming {local_parquet_dir} → {DW_BACKEND.upper()} (batch={_BATCH_SIZE:,} rows)")
 
-    # pyarrow.dataset supports real streaming to_batches() without loading all into RAM
-    dataset = pad.dataset(local_parquet_dir, format="parquet")
+    # pyarrow.dataset with partitioning="hive" reconstructs partition columns (e.g. state_code)
+    # from folder names like state_code=CA/, state_code=TX/ — same behavior as pd.read_parquet()
+    dataset = pad.dataset(local_parquet_dir, format="parquet", partitioning="hive")
 
     if DW_BACKEND == "postgresql":
         _stream_to_postgres(dataset, year)
