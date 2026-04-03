@@ -283,46 +283,44 @@ This is managed centrally via Airflow's `default_args` using the `AIRFLOW_VAR_EM
 
 ```mermaid
 flowchart TD
-    %% Decision point
-    Switch{{"Environment Variable<br>(DW_BACKEND)"}}
+    %% Selector
+    Switch{{"DW_BACKEND"}}
 
-    subgraph PG_DB ["🐘 Option A: PostgreSQL (Local)"]
-        PG_RAW[("credit_risk.stg_loans<br>(Physical, partitioned)")]
-        PG_STG["stg.stg_loans<br>(dbt View)"]
-        PG_RAW --> PG_STG
-    end
+    %% PostgreSQL Branch
+    Switch -. "Option A<br>(postgresql)" .-> PG_RAW[("🐘 PostgreSQL<br>credit_risk.stg_loans<br>(Physical)")]
+    PG_RAW --> PG_STG["stg.stg_loans<br>(dbt view)"]
 
-    subgraph SF_DB ["❄️ Option B: Snowflake (Cloud)"]
-        SF_RAW[("RAW.STG_LOANS<br>(Physical, clustered)")]
-        SF_STG["STG.stg_loans<br>(dbt View)"]
-        SF_RAW --> SF_STG
-    end
+    %% Snowflake Branch
+    Switch -. "Option B<br>(snowflake)" .-> SF_RAW[("❄️ Snowflake<br>RAW.STG_LOANS<br>(Physical)")]
+    SF_RAW --> SF_STG["STG.stg_loans<br>(dbt view)"]
 
-    Switch -. "If 'postgresql'" .-> PG_DB
-    Switch -. "If 'snowflake'" .-> SF_DB
+    %% Convergence
+    Gateway{"dbt build"}
+    PG_STG ==>|"target: dev"| Gateway
+    SF_STG ==>|"target: snowflake"| Gateway
 
-    subgraph Prod_DB ["📈 dbt PROD schema (Common Layer)"]
+    %% Production Marts (Unified)
+    subgraph PROD ["📈 Production Marts (Common Layer)"]
         direction LR
-        FCT(["fct_loan_risk<br>(Fact: Risk Segments)"])
-        SUM(["prd_risk_summary<br>(Agg: State-level)"])
-        SAMP(["prd_loan_sample<br>(Sample: Scatter)"])
+        FCT(["fct_loan_risk"])
+        SUM(["prd_risk_summary"])
+        SAMP(["prd_loan_sample"])
     end
 
-    PG_STG -.->|target: dev| FCT & SUM & SAMP
-    SF_STG -.->|target: snowflake| FCT & SUM & SAMP
+    Gateway ==> FCT & SUM & SAMP
 
     %% Styling
-    classDef sf fill:#29B5E8,color:#fff,stroke:#1a90bc,stroke-width:2px;
-    classDef pg fill:#336791,color:#fff,stroke:#234a69,stroke-width:2px;
-    classDef stg fill:#FF694B,color:#fff,stroke:#cc543c,stroke-width:2px;
-    classDef prod fill:#2EA043,color:#fff,stroke:#1f702f,stroke-width:2px,rx:10px,ry:10px;
-    classDef choice fill:#f1c40f,color:#000,stroke:#d4ac0d,stroke-width:2px;
+    classDef sf fill:#29B5E8,color:#fff,stroke:#1a90bc;
+    classDef pg fill:#336791,color:#fff,stroke:#234a69;
+    classDef stg fill:#FF694B,color:#fff,stroke:#cc543c;
+    classDef prod fill:#2EA043,color:#fff,stroke:#1f702f,rx:10px;
+    classDef choice fill:#f1c40f,color:#000,stroke:#d4ac0d;
 
     class SF_RAW sf;
     class PG_RAW pg;
-    class SF_STG,PG_STG stg;
+    class PG_STG,SF_STG stg;
     class FCT,SUM,SAMP prod;
-    class Switch choice;
+    class Switch,Gateway choice;
 ```
 
 ### Risk Segmentation Logic (in `fct_loan_risk.sql`)
