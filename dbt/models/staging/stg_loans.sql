@@ -1,10 +1,8 @@
 -- Staging layer: Thin cleaning and renaming for the Marts layer
 -- Supports optional year filtering via --vars 'data_year: 2024' (from Airflow param)
+
 with source as (
     select * from {{ source('credit_risk_source', 'stg_loans') }}
-    {% if var('data_year', none) is not none %}
-    where data_year = {{ var('data_year') }}
-    {% endif %}
 )
 
 select

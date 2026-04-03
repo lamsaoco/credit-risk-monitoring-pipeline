@@ -22,6 +22,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.models import Variable
 from airflow.models.param import Param
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils.email import send_email
 from datetime import datetime, timedelta
 import os
@@ -270,13 +271,27 @@ def _load_snowflake(df, year: int):
         user=conn_info.login,
         password=conn_info.password,
         database=extra.get("database", "CREDIT_RISK_DW"),
-        schema=extra.get("schema", "STG"),   # STG matches warehouse/snowflake/schema.sql
+        schema=extra.get("schema", "RAW"),   # RAW matches terraform schema raw
         warehouse=extra.get("warehouse", "COMPUTE_WH"),
         role=extra.get("role", "SYSADMIN"),
     )
 
-    # Pre-processing: Handle types and NaNs for Snowflake
-    df_sf = df.copy()
+    # Columns that exist in the target table (match with Postgres logic)
+    target_columns = [
+        "activity_year", "lei", "state_code", "county_code", "census_tract",
+        "loan_type", "loan_purpose", "loan_amount", "interest_rate",
+        "property_value", "occupancy_type", "lien_status",
+        "income", "applicant_age",
+        "loan_to_value_ratio", "debt_to_income_numeric",
+        "mkt_benchmark", "interest_rate_spread",
+        "data_year",
+    ]
+
+    # Filter to only available columns (defensive)
+    available = [c for c in target_columns if c in df.columns]
+    df_sf = df[available].copy()
+    
+    # Uppercase columns for Snowflake compatibility
     df_sf.columns = [c.upper() for c in df_sf.columns]
     df_sf["DATA_YEAR"] = year
 
@@ -304,7 +319,7 @@ def _load_snowflake(df, year: int):
             conn=sf_conn,
             df=chunk,
             table_name="STG_LOANS",
-            schema="STG",             # Explicit schema — avoids relying solely on connection default
+            schema="RAW",             # Explicit schema — avoids relying solely on connection default
             auto_create_table=False,
         )
 
@@ -337,8 +352,9 @@ with DAG(
     "credit_risk_load_warehouse",
     default_args=default_args,
     description=f"Load enriched mortgage data from S3 staging → {DW_BACKEND.upper()} DW",
-    schedule_interval="@yearly",
+    schedule_interval=None, # Triggered exclusively by the upstream Transform DAG
     catchup=False,
+    render_template_as_native_obj=True,
     tags=["warehouse", "load", DW_BACKEND],
     params={
         "year": Param(2024, type="integer", title="Processing Year"),
@@ -370,4 +386,11 @@ with DAG(
         trigger_rule="all_done",
     )
 
-    t1 >> t2 >> t3 >> t4
+    t5 = TriggerDagRunOperator(
+        task_id="trigger_dbt_marts",
+        trigger_dag_id="credit_risk_dbt_marts",
+        conf={"year": "{{ params.year }}"},
+        wait_for_completion=False, # Fire-and-forget: offload execution to the dbt DAG without blocking here
+    )
+
+    t1 >> t2 >> t3 >> t4 >> t5

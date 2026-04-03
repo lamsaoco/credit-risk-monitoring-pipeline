@@ -26,6 +26,6 @@ credit_risk_profile:
       role: "{{ env_var('SNOWFLAKE_ROLE', 'SYSADMIN') }}"
       database: "{{ env_var('SNOWFLAKE_DATABASE', 'CREDIT_RISK_DW') }}"
       warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH') }}"
-      schema: STG            # base schema for sources; marts land in PROD via macro
+      schema: RAW            # base schema for sources; models land in STG/PROD via macro
       threads: 4
       client_session_keep_alive: false

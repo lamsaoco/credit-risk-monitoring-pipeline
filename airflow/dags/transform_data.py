@@ -5,6 +5,7 @@ from airflow.utils.email import send_email
 from airflow.models import Variable
 from datetime import datetime, timedelta
 from airflow.models.param import Param
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 import os
 import sys
 import shutil
@@ -198,8 +199,9 @@ with DAG(
     'mortgage_risk_staging_enrichment',
     default_args=default_args,
     description='Enriches 12M Mortgage records with Market Rates and Risk Ratios',
-    schedule_interval='@yearly', # Automatically runs each year
+    schedule_interval=None, # Disabled automatic schedule; triggered solely by upstream Ingest DAG
     catchup=False,
+    render_template_as_native_obj=True,
     tags=['mortgage', 'staging', 'spark'],
     params={
         "year": Param(2024, type="integer", title="Processing Year")
@@ -237,4 +239,11 @@ with DAG(
         trigger_rule="all_done"
     )
 
-    t1 >> t2 >> t3 >> t4 >> t5
+    t6 = TriggerDagRunOperator(
+        task_id="trigger_load_warehouse",
+        trigger_dag_id="credit_risk_load_warehouse",
+        conf={"year": "{{ params.year }}"},
+        wait_for_completion=False,
+    )
+
+    t1 >> t2 >> t3 >> t4 >> t5 >> t6

@@ -2,6 +2,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.models import Variable
 from airflow.models.param import Param
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils.email import send_email
 from datetime import datetime, timedelta
 import os
@@ -282,6 +283,7 @@ with DAG(
     description='Master Ingestion: FRED API & Modular HMDA Spark on LocalExecutor',
     schedule_interval='@yearly',
     catchup=False,
+    render_template_as_native_obj=True,
     params={
         "year": Param(2024, type="integer", title="Ingestion Year")
     }
@@ -319,9 +321,17 @@ with DAG(
         trigger_rule='all_done' # Ensure cleanup runs even if upload or process fails
     )
 
+    task_trigger_transform = TriggerDagRunOperator(
+        task_id="trigger_transform",
+        trigger_dag_id="mortgage_risk_staging_enrichment",
+        conf={"year": "{{ params.year }}"},
+        wait_for_completion=False,
+        trigger_rule="all_done"
+    )
+
     # Define execution graph
-    # FRED drops directly into S3 independently
-    task_fred
-    
-    # HMDA runs sequentially to minimize concurrent RAM usage and manage data handoff
+    # 1. HMDA data extraction and processing
     task_dl_hmda >> task_spark_hmda >> task_s3_hmda >> task_clean_hmda
+    
+    # 2. Both FRED (standalone API) and HMDA (Spark) must finish before triggering Transform
+    [task_fred, task_clean_hmda] >> task_trigger_transform

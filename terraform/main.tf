@@ -76,7 +76,16 @@ resource "snowflake_database" "credit_risk_dw" {
   name  = "CREDIT_RISK_DW"
 }
 
-# STG schema — source layer for Airflow → dbt staging models
+# RAW schema — source layer for raw data from Airflow
+resource "snowflake_schema" "raw" {
+  count    = var.enable_snowflake ? 1 : 0
+  database = snowflake_database.credit_risk_dw[0].name
+  name     = "RAW"
+
+  depends_on = [snowflake_database.credit_risk_dw]
+}
+
+# STG schema — output layer for dbt staging models
 resource "snowflake_schema" "stg" {
   count    = var.enable_snowflake ? 1 : 0
   database = snowflake_database.credit_risk_dw[0].name
@@ -108,8 +117,8 @@ resource "snowflake_warehouse" "compute_wh" {
 # CLUSTER BY (DATA_YEAR, STATE_CODE) replaces PostgreSQL LIST partitioning for query performance.
 resource "snowflake_table" "stg_loans" {
   count    = var.enable_snowflake ? 1 : 0
-  database = snowflake_schema.stg[0].database
-  schema   = snowflake_schema.stg[0].name
+  database = snowflake_schema.raw[0].database
+  schema   = snowflake_schema.raw[0].name
   name     = "STG_LOANS"
 
   # Auto-increment primary key (mirrors PostgreSQL stg_loans_id_seq)
@@ -207,7 +216,7 @@ resource "snowflake_table" "stg_loans" {
   # Clustering key replaces PostgreSQL LIST partitioning (DATA_YEAR / STATE_CODE)
   cluster_by = ["DATA_YEAR", "STATE_CODE"]
 
-  depends_on = [snowflake_schema.stg]
+  depends_on = [snowflake_schema.raw]
 }
 
 # ─────────────────────────────────────────────────────────────────────────── #

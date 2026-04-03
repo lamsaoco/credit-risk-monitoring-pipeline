@@ -11,58 +11,87 @@ st.set_page_config(
     layout="wide"
 )
 
-# Restore original clean colors
-risk_colors = {'High': '#ff4b4b', 'Medium': '#ffa421', 'Low': '#00d4ff'}
+# --- Corporate Trust Theme Colors ---
+risk_colors = {'High': '#E63946', 'Medium': '#B38D4F', 'Low': '#457B9D'}
 
-# Modern Light Mode CSS
+# Corporate Edge CSS
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Playfair+Display:wght@600&display=swap');
     
     html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
+        font-family: 'Roboto', sans-serif;
     }
     h1, h2, h3, h4, .st-emotion-cache-10trblm {
-        font-family: 'Outfit', sans-serif !important;
-        color: #1f2937 !important;
+        font-family: 'Playfair Display', serif !important;
+        color: #1D3557 !important;
     }
     
-    /* Elegant soft blue-gray background */
+    /* Clean light gray background */
     [data-testid="stAppViewContainer"] {
-        background-color: #f0f4f8;
+        background-color: #F8F9FA;
     }
-    /* Solid white sidebar for contrast */
+    /* Solid white sidebar with corporate navy border */
     [data-testid="stSidebar"] {
-        background-color: #ffffff;
-        border-right: 1px solid #e5e7eb;
+        background-color: #FFFFFF;
+        border-right: 4px solid #1D3557;
     }
     
-    /* White Card metrics with soft shadows */
+    /* Crisp White Metric Cards with subtle edge shadow */
     [data-testid="stMetric"] {
-        background-color: #ffffff;
+        background-color: #FFFFFF;
         padding: 20px;
-        border-radius: 12px;
-        border: 1px solid #e5e7eb;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        border-radius: 8px;
+        border: 1px solid #E9ECEF;
+        border-top: 4px solid #1D3557;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
         transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
-    /* Bounce animation on hover */
+    /* Polished hover effect */
     [data-testid="stMetric"]:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 12px rgba(29, 53, 87, 0.1);
+        border-top: 4px solid #B38D4F;
     }
     
-    /* Subdued label color */
+    /* Metric label styling */
     [data-testid="stMetricLabel"] *, [data-testid="stMetricLabel"] {
-        color: #6b7280 !important;
+        color: #495057 !important;
         font-weight: 500 !important;
-        font-family: 'Inter', sans-serif;
+        text-transform: uppercase;
+        font-size: 0.85rem;
+        letter-spacing: 0.5px;
     }
-    /* Bold dark-gray metrics */
+    
+    /* Metric value typography */
     [data-testid="stMetricValue"] {
-        color: #111827 !important;
-        font-family: 'Outfit', sans-serif;
+        color: #1D3557 !important;
         font-weight: 700 !important;
+        font-size: 2rem !important;
+    }
+    
+    /* Streamlit tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 24px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: transparent;
+        border-radius: 4px 4px 0px 0px;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        color: #495057;
+        font-weight: 500;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #FFFFFF;
+        color: #1D3557 !important;
+        font-weight: 700 !important;
+        border-top: 3px solid #B38D4F;
+        border-left: 1px solid #E9ECEF;
+        border-right: 1px solid #E9ECEF;
     }
     </style>
     """, unsafe_allow_html=True)
