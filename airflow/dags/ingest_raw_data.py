@@ -76,9 +76,13 @@ def ingest_fred_to_raw():
         df_pd = pd.DataFrame(series_data, columns=['fed_rate']).reset_index()
         df_pd.rename(columns={'index': 'observation_date'}, inplace=True)
         
-        # Save to S3 Raw folder
+        # Cast timestamp from nanoseconds to microseconds:
+        # PySpark cannot read TIMESTAMP(NANOS,false) from Parquet — only MICROS is supported
+        df_pd['observation_date'] = df_pd['observation_date'].astype('datetime64[us]')
+
+        # Save to S3 Raw folder (pyarrow engine writes TIMESTAMP(MICROS) by default)
         output_s3 = f"s3://{s3_bucket}/raw/fred_raw/data.parquet"
-        df_pd.to_parquet(output_s3)
+        df_pd.to_parquet(output_s3, engine='pyarrow')
         print(f"✅ FRED data successfully updated in S3 Raw.")
     except Exception as e:
         print(f"❌ FRED Ingestion Error: {str(e)}")
