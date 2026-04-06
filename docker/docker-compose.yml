@@ -24,6 +24,8 @@ x-airflow-common: &airflow-common
     - ../dbt:/opt/airflow/dbt
     - ../docker:/opt/airflow/docker
     - /var/run/docker.sock:/var/run/docker.sock
+  group_add:
+    - "988" # Host docker group GID (matches 'docker' group on host)
   depends_on:
     postgres:
       condition: service_healthy
@@ -39,7 +41,10 @@ services:
       - ..:/project
       - /var/run/docker.sock:/var/run/docker.sock
     command: >
-      bash -c "chmod 666 /var/run/docker.sock && mkdir -p /project/airflow/dags /project/airflow/logs /project/airflow/plugins && chmod -R 777 /project/airflow/dags /project/airflow/logs /project/airflow/plugins"
+      bash -c "chmod 666 /var/run/docker.sock && 
+               mkdir -p /project/airflow/dags /project/airflow/logs /project/airflow/plugins && 
+               chmod -R 777 /project/airflow/dags /project/airflow/logs /project/airflow/plugins &&
+               echo 'Docker socket and project folders setup complete.'"
 
   postgres:
     image: postgres:15
