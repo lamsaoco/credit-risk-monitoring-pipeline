@@ -72,6 +72,10 @@ This project builds a **production-grade, fully automated data engineering pipel
 - Transforms raw warehouse data into analytical **dbt marts** with risk segmentation logic
 - Serves a **real-time Streamlit dashboard** allowing filtering by year, state, risk segment, and loan type
 
+<div align="center">
+  <img src="pictures/overrall_dashboard.png" width="900" alt="Overall Dashboard">
+</div>
+
 ---
 
 ## 🏗️ Solution Architecture
@@ -323,6 +327,12 @@ flowchart TD
     class Switch,Gateway choice;
 ```
 
+### Risk Segmentation & Hierarchy
+
+<div align="center">
+  <img src="pictures/risk_hierarchy.png" width="600" alt="Risk Hierarchy">
+</div>
+
 ### Risk Segmentation Logic (in `fct_loan_risk.sql`)
 
 | Risk Segment | Condition |
@@ -376,6 +386,25 @@ The Streamlit dashboard (port `8501`) provides:
 | **LTV vs. DTI Scatter** | Sample scatter colored by risk segment |
 
 **Theme:** Corporate Trust — Navy Blue (`#1D3557`) + Gold (`#B38D4F`) + clean white background, powered by `Playfair Display` + `Roboto` typefaces from Google Fonts.
+
+### 🖼️ Dashboard Visuals
+
+<div align="center">
+  <img src="pictures/geography_heatmap.png" width="800" alt="Geography Heatmap">
+  <br>
+  <i>Choropleth map of loan count by state</i>
+</div>
+
+<br>
+
+<div align="center">
+  <img src="pictures/income_vs_spread.png" width="45%" alt="Income vs Spread">
+  <img src="pictures/purpose_breakdown.png" width="45%" alt="Purpose Breakdown">
+</div>
+
+<div align="center">
+  <i>LTV vs. DTI Scatter & Loan Type Breakdown</i>
+</div>
 
 ---
 
