@@ -30,7 +30,7 @@ LOGO_CACHE  = Path(__file__).parent / ".logo_cache"
 LOGO_CACHE.mkdir(exist_ok=True)
 
 WIDTH  = 2180
-HEIGHT = 1020
+HEIGHT = 860
 BG_COLOR   = (13, 17, 23)
 CARD_COLOR = (22, 27, 34)
 
@@ -82,21 +82,21 @@ NODES = [
 
 # Node positions (cx, cy)
 POSITIONS = {
-    "hmda":      (180,  370),
-    "fred":      (180,  570),
-    "airflow":   (900,  148),   # rendered as banner, not card
-    "pyspark_in":(430,  470),
-    "s3_raw":    (690,  470),
-    "spark":     (950,  470),
-    "s3_stg":    (1210, 470),
-    "postgres":  (1470, 350),
-    "snowflake": (1470, 590),
-    "dbt":       (1730, 470),
-    "streamlit": (1990, 470),
+    "hmda":      (180,  290),
+    "fred":      (180,  510),
+    "airflow":   (900,  88),   # rendered as banner, not card
+    "pyspark_in":(430,  400),
+    "s3_raw":    (690,  400),
+    "spark":     (950,  400),
+    "s3_stg":    (1210, 400),
+    "postgres":  (1470, 270),
+    "snowflake": (1470, 530),
+    "dbt":       (1730, 400),
+    "streamlit": (1990, 400),
     # Infra row
-    "terraform": (1470, 790),
-    "docker":    (950,  790),
-    "ec2":       (1210, 790),
+    "terraform": (1470, 710),
+    "docker":    (950,  710),
+    "ec2":       (1210, 710),
 }
 
 EDGES = [
@@ -119,14 +119,14 @@ EDGE_COLORS = {
 }
 
 LAYER_LABELS = [
-    (180,  200, "DATA SOURCES",    (78, 201, 176)),
-    (430,  200, "INGESTION",       (86, 156, 214)),
-    (690,  200, "DATA LAKE RAW",   (255, 153,   0)),
-    (950,  200, "PROCESSING",      (226,  90,  28)),
-    (1210, 200, "DATA LAKE STG",   (255, 153,   0)),
-    (1470, 200, "DATA WAREHOUSE",  (100, 180, 255)),
-    (1730, 200, "TRANSFORM",       (255, 105,  75)),
-    (1990, 200, "DASHBOARD",       (255,  75,  75)),
+    (180,  150, "DATA SOURCES",    (78, 201, 176)),
+    (430,  150, "INGESTION",       (86, 156, 214)),
+    (690,  150, "DATA LAKE RAW",   (255, 153,   0)),
+    (950,  150, "PROCESSING",      (226,  90,  28)),
+    (1210, 150, "DATA LAKE STG",   (255, 153,   0)),
+    (1470, 150, "DATA WAREHOUSE",  (100, 180, 255)),
+    (1730, 150, "TRANSFORM",       (255, 105,  75)),
+    (1990, 150, "DASHBOARD",       (255,  75,  75)),
 ]
 
 # ---------------------------------------------------------------------------
@@ -285,22 +285,12 @@ def build_diagram():
         draw.line([(0, y), (WIDTH, y)], fill=(r, g, b))
 
     # Fonts
-    f_title  = get_font(46, bold=True)
-    f_sub    = get_font(22)
-    f_layer  = get_font(13, bold=True)
-    f_label  = get_font(17, bold=True)
+    f_layer  = get_font(15, bold=True)
+    f_label  = get_font(16, bold=True)
     f_small  = get_font(13)
-    f_edge   = get_font(12)
-    f_dag    = get_font(11)
-
-    # ── Title ──────────────────────────────────────────────────────────────────
-    draw.text((WIDTH // 2, 26),
-              "Credit Risk Monitoring Pipeline",
-              font=f_title, fill=(210, 225, 255), anchor="mt")
-    draw.text((WIDTH // 2, 82),
-              "End-to-End Data Engineering  |  Tech Stack & Data Flow Architecture",
-              font=f_sub, fill=(120, 135, 175), anchor="mt")
-    draw.line([(60, 112), (WIDTH - 60, 112)], fill=(45, 55, 85), width=1)
+    f_edge   = get_font(13)
+    f_dag    = get_font(13)
+    f_banner = get_font(20, bold=True)
 
     # ── Airflow Banner ─────────────────────────────────────────────────────────
     af_cx, af_cy = POSITIONS["airflow"]
@@ -319,7 +309,7 @@ def build_diagram():
 
     draw.text((bx0 + 72, by0 + bh // 2),
               "Apache Airflow  |  DAG Orchestration & Automated Chaining",
-              font=f_label, fill=(90, 180, 255), anchor="lm")
+              font=f_banner, fill=(90, 180, 255), anchor="lm")
               
     # Env badge for Airflow
     af_env = "Docker Compose / EC2"
@@ -374,12 +364,12 @@ def build_diagram():
         draw.text((lx, ly), lname, font=f_layer, fill=(*lcol, 190), anchor="mt")
 
     # Infra separator
-    draw.line([(60, 740), (WIDTH - 60, 740)], fill=(42, 48, 70), width=1)
-    draw.text((80, 748), "INFRASTRUCTURE LAYER",
+    draw.line([(60, 630), (WIDTH - 60, 630)], fill=(42, 48, 70), width=1)
+    draw.text((80, 638), "INFRASTRUCTURE LAYER",
               font=f_layer, fill=(120, 120, 160, 200))
 
     # ── Edges ──────────────────────────────────────────────────────────────────
-    bound_w, bound_h = 88, 64   # card bounding box for edge intersection
+    bound_w, bound_h = 78, 54   # card bounding box for edge intersection
 
     for src, dst, elabel, estyle in EDGES:
         if src not in POSITIONS or dst not in POSITIONS:
@@ -408,8 +398,8 @@ def build_diagram():
                    col, width=lw, label=elabel, font=f_edge)
 
     # ── Node Cards ─────────────────────────────────────────────────────────────
-    cardw, cardh = 160, 118
-    logo_sz = 44
+    cardw, cardh = 156, 114
+    logo_sz = 46
 
     ENV_MAP = {
         "pyspark_in": "Docker Compose / EC2",
@@ -447,14 +437,14 @@ def build_diagram():
         logo = logo_map.get(nid)
         if logo:
             lx = cx - logo_sz // 2
-            ly = y0 + 18
+            ly = y0 + 16
             draw.ellipse([lx - 5, ly - 5, lx + logo_sz + 5, ly + logo_sz + 5],
-                        fill=(255, 255, 255, 22))
+                         fill=(255, 255, 255, 22))
             logo_r = logo.resize((logo_sz, logo_sz), Image.LANCZOS)
             canvas.paste(logo_r, (lx, ly), logo_r)
 
         # Text
-        ty = y0 + 18 + logo_sz + 12
+        ty = y0 + 16 + logo_sz + 12
         draw.text((cx, ty), label, font=f_label, fill=(215, 228, 255), anchor="mt")
         draw.text((cx, ty + 24), sub, font=f_small, fill=(*rgb, 195), anchor="mt")
 

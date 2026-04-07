@@ -83,6 +83,7 @@ This project builds a **production-grade, fully automated data engineering pipel
 <div align="center">
   <img src="pictures/architecture_diagram.png" width="1000" alt="Architecture Diagram">
 </div>
+
 ---
 
 ## 🛠️ Tech Stack
