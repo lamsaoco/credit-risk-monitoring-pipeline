@@ -80,61 +80,9 @@ This project builds a **production-grade, fully automated data engineering pipel
 
 ## 🏗️ Solution Architecture
 
-```mermaid
-flowchart TD
-    %% Nodes
-    S3_Raw[("☁️ AWS S3 (Raw)<br>hmda/ & fred_raw/")]
-    PySpark["🔥 PySpark (Local)<br>Compute LTV, DTI & Spread"]
-    S3_Staging[("☁️ AWS S3 (Staging)<br>enriched_parquet/")]
-    
-    %% Target choice
-    TargetChoice{{"Backend Switch<br>(env: DW_BACKEND)"}}
-    
-    PG[("🐘 PostgreSQL<br>(Local - Option A)")]
-    SF[("❄️ Snowflake<br>(Cloud - Option B)")]
-    
-    DBT["🛠️ dbt Models<br>Staging Views → Prod Marts"]
-    Streamlit["📈 Streamlit Dashboard<br>Risk Heatmaps & KPIs"]
-    
-    %% Orchestration
-    subgraph Airflow ["⏱️ Apache Airflow Orchestration (Automated Chaining)"]
-        direction LR
-        DAG1(["DAG 1:<br>Ingest"]) --> DAG2(["DAG 2:<br>Transform"])
-        DAG2 --> DAG3(["DAG 3:<br>Load DW"])
-        DAG3 --> DAG4(["DAG 4:<br>dbt Build"])
-    end
-
-    %% Data Flow
-    S3_Raw == "DAG 2" ==> PySpark
-    PySpark == "DAG 2" ==> S3_Staging
-    
-    S3_Staging == "DAG 3" ==> TargetChoice
-    TargetChoice -. "Option A" .-> PG
-    TargetChoice -. "Option B" .-> SF
-    
-    PG == "DAG 4" ==> DBT
-    SF == "DAG 4" ==> DBT
-    DBT ==> Streamlit
-
-    %% Styling
-    classDef s3 fill:#FF9900,color:#fff,stroke:#e68a00,stroke-width:2px,rx:5px,ry:5px;
-    classDef spark fill:#E25A1C,color:#fff,stroke:#b34716,stroke-width:2px,rx:5px,ry:5px;
-    classDef dw fill:#29B5E8,color:#fff,stroke:#1a90bc,stroke-width:2px,rx:5px,ry:5px;
-    classDef pg fill:#336791,color:#fff,stroke:#234a69,stroke-width:2px,rx:5px,ry:5px;
-    classDef dbt fill:#FF694B,color:#fff,stroke:#cc543c,stroke-width:2px,rx:5px,ry:5px;
-    classDef app fill:#FF4B4B,color:#fff,stroke:#cc3c3c,stroke-width:2px,rx:5px,ry:5px;
-    classDef airflow fill:#017CEE,color:#fff,stroke:#015bb0,stroke-width:2px;
-    classDef choice fill:#f1c40f,color:#000,stroke:#d4ac0d,stroke-width:2px;
-    
-    class S3_Raw,S3_Staging s3;
-    class PySpark spark;
-    class SF dw;
-    class PG pg;
-    class DBT dbt;
-    class Streamlit app;
-    class DAG1,DAG2,DAG3,DAG4 airflow;
-    class TargetChoice choice;
-```
+<div align="center">
+  <img src="pictures/architecture_diagram.png" width="1000" alt="Architecture Diagram">
+</div>
 ---
 
 ## 🛠️ Tech Stack
