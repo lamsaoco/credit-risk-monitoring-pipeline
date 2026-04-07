@@ -67,7 +67,7 @@ Despite the data being publicly available, **mortgage risk officers, analysts, a
 This project builds a **production-grade, fully automated data engineering pipeline** that:
 
 - Ingests 12M+ HMDA mortgage records and Federal Reserve interest rate data annually
-- Enriches raw data with computed risk features via **PySpark** in a distributed processing step
+- Enriches raw data with computed risk features via **PySpark** in a distributed processing step, partitioning data by `state_code` for optimized S3 folder management
 - Loads the enriched dataset into a **dual-backend Data Warehouse** (PostgreSQL for local/dev, Snowflake for cloud/production) — switchable with a single environment variable
 - Transforms raw warehouse data into analytical **dbt marts** with risk segmentation logic
 - Serves a **real-time Streamlit dashboard** allowing filtering by year, state, risk segment, and loan type
@@ -167,7 +167,7 @@ The pipeline is composed of **4 chained Airflow DAGs**. Triggering DAG 1 automat
 DAG 1: credit_risk_master_ingestion
    ├── ingest_fred_api          # Pull Fed Funds Rate from FRED API → S3
    ├── download_hmda_data       # Download HMDA ZIP from CFPB → local
-   ├── process_hmda_spark       # PySpark CSV → Parquet (schema enforcement)
+   ├── process_hmda_spark       # PySpark CSV → Parquet (schema enforcement, partitioned by state_code in S3)
    ├── upload_hmda_s3           # Upload cleaned Parquet → S3 raw/
    ├── cleanup_hmda_local       # Free up local disk space
    └── trigger_transform ──────▶ DAG 2
@@ -219,7 +219,7 @@ This is managed centrally via Airflow's `default_args` using the `AIRFLOW_VAR_EM
 - **Provider:** Consumer Financial Protection Bureau (CFPB)
 - **URL:** `https://files.ffiec.cfpb.gov/dynamic-data/{year}/{year}_lar.zip`
 - **Volume:** ~12 million rows per year
-- **Format:** ZIP-compressed CSV → converted to Parquet via PySpark
+- **Format:** ZIP-compressed CSV → converted to Parquet via PySpark (partitioned by `state_code` in S3)
 - **Key Fields:** `state_code`, `loan_type`, `loan_amount`, `interest_rate`, `property_value`, `income`, `applicant_age`, `debt_to_income_ratio`
 
 ### 2. FRED (Federal Reserve Economic Data)
@@ -306,8 +306,8 @@ The project supports **two interchangeable DW backends**, controlled by a single
 ### PostgreSQL (Local / Development)
 - Dedicated container `postgres-dw` (port 5433)
 - Schema: `credit_risk`
-- Table: `credit_risk.stg_loans` — **LIST-partitioned by `data_year`**
-- Predicate pushdown via partition pruning for year-filtered queries
+- Table: `credit_risk.stg_loans` — **LIST-partitioned by `data_year` and sub-partitioned by `state_code`**
+- Predicate pushdown via partition pruning for year and state-filtered queries
 - dbt target: `dev`
 
 ### Snowflake (Cloud / Production)
